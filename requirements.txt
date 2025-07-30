@@ -1,0 +1,8 @@
+requests
+biopython
+openbabel
+rdkit
+numpy
+scipy
+matplotlib
+pandas

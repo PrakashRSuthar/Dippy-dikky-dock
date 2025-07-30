@@ -1,0 +1,20 @@
+name: dippydock_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - rdkit
+  - openbabel
+  - meeko # Add Meeko
+  - numpy
+  - scipy
+  - matplotlib
+  - fastapi
+  - uvicorn
+  - requests
+  - biopython
+  - py3dmol
+  - pandas
+  - openpyxl
