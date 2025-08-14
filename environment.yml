@@ -2,19 +2,74 @@ name: dippydock_env
 channels:
   - conda-forge
   - defaults
+  - bioconda
+
 dependencies:
+  # Core Python
   - python=3.11
   - pip
+
+  # Essential molecular tools (CRITICAL - don't remove)
   - rdkit
-  - openbabel
-  - meeko # Add Meeko
+  - openbabel  # Includes Python bindings
+  - meeko      # Essential for ligand preparation
+
+  # Scientific computing (REQUIRED for your modules)
   - numpy
   - scipy
-  - matplotlib
-  - fastapi
-  - uvicorn
-  - requests
-  - biopython
-  - py3dmol
   - pandas
-  - openpyxl
+  - matplotlib
+
+  # Bioinformatics (NEEDED for protein processing)
+  - biopython  # Required for protein_preprocessor.py
+  - mdanalysis # Advanced molecular analysis
+
+  # Web framework (FOR FUTURE UI)
+  - fastapi    # Your planned web interface
+  - uvicorn    # ASGI server
+  - requests   # HTTP requests (PubChem API)
+
+  # Visualization (IMPORTANT for results analysis)
+  - py3dmol    # 3D molecular visualization
+  - plotly     # Interactive plots
+  - seaborn    # Statistical visualization
+
+  # File handling (ESSENTIAL for data processing)
+  - openpyxl   # Excel file support
+  - xlsxwriter # Excel writing
+  - pyyaml     # YAML configuration files
+
+  # Development tools (HELPFUL for debugging/testing)
+  - jupyter    # Interactive development
+  - notebook   # Jupyter notebooks
+  - pytest     # Testing framework
+  - pytest-cov # Test coverage
+
+  # Machine learning & statistics (USEFUL for accuracy evaluation)
+  - scikit-learn # ML algorithms
+  - statsmodels  # Statistical modeling
+  - h5py        # HDF5 file format
+  - networkx    # Graph analysis
+  - joblib      # Parallel computing
+
+  # System utilities (HELPFUL for pipeline management)
+  - tqdm       # Progress bars
+  - psutil     # System monitoring
+  - chardet    # Character encoding detection
+  - pathlib2   # Enhanced path handling
+
+  # Additional scientific tools
+  - xlrd       # Reading Excel files
+  - openpyxl   # Excel file handling
+  - lxml       # XML/HTML parsing
+  - beautifulsoup4 # Web scraping (if needed)
+  - xmltodict  # XML to dictionary conversion
+
+  # Pip-only packages (STABLE VERSIONS ONLY)
+  - pip:
+    - openbabel-wheel    # Alternative OpenBabel with Python bindings
+    - prody             # Protein dynamics analysis
+    - biotite           # Modern bioinformatics library
+    - pubchempy         # PubChem API client (CRITICAL for ligand fetching)
+    - chembl-webresource-client # ChEMBL database access
+    # Removed pymol-open-source - causes pip failures, not essential

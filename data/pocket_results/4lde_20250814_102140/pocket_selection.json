@@ -1,0 +1,15 @@
+{
+  "primary": {
+    "center_x": 1.206,
+    "center_y": -6.927,
+    "center_z": -25.609,
+    "size_x": 27.16,
+    "size_y": 31.61,
+    "size_z": 36.0,
+    "method": "p2rank_ligadj",
+    "confidence": "high",
+    "confidence_score": 0.98
+  },
+  "alternatives": [],
+  "notes": "P2Rank-driven pockets with ligand-aware adjustment (from ligand file or HETATM if available)."
+}

@@ -1,0 +1,15 @@
+{
+  "primary": {
+    "center_x": 4.5,
+    "center_y": 67.0,
+    "center_z": 70.0,
+    "size_x": 22,
+    "size_y": 22,
+    "size_z": 22,
+    "method": "validated",
+    "confidence": "high",
+    "confidence_score": 0.99
+  },
+  "alternatives": [],
+  "notes": "P2Rank-driven pockets with ligand-aware adjustment (from ligand file or HETATM if available)."
+}

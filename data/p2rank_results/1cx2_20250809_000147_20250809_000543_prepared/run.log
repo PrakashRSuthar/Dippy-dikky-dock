@@ -1,0 +1,115 @@
+[INFO] Console - predicting pockets for proteins from dataset [1cx2_20250809_000147_20250809_000543_prepared.pdbqt]
+[INFO] PredictPocketsRoutine - outdir: data\p2rank_results\1cx2_20250809_000147_20250809_000543_prepared
+[INFO] FeatureSetup - enabledFeatures: [chem, volsite, protrusion, bfactor, atom_table]
+[INFO] Dataset - processing dataset [1cx2_20250809_000147_20250809_000543_prepared.pdbqt] using 0 threads
+[INFO] Dataset - 
+------------------------------------------------------------------------------------------------------------------------
+processing [1cx2_20250809_000147_20250809_000543_prepared.pdbqt] (1/1)
+------------------------------------------------------------------------------------------------------------------------
+
+[INFO] Console - processing [1cx2_20250809_000147_20250809_000543_prepared.pdbqt] (1/1)
+[INFO] Protein - loading protein [D:\Dippy-dikky-dock\data\prepared_proteins\1cx2_20250809_000147_20250809_000543_prepared.pdbqt]
+[INFO] PdbUtils - loading file [D:\Dippy-dikky-dock\data\prepared_proteins\1cx2_20250809_000147_20250809_000543_prepared.pdbqt]
+[INFO] Struct - all groups in chain A: 552
+[INFO] Struct - all groups in chain B: 552
+[INFO] Struct - all groups in chain C: 552
+[INFO] Struct - all groups in chain D: 552
+[INFO] Struct - all groups in chain A: 552
+[INFO] Struct - 552 groups in chain A
+[INFO] Struct - all groups in chain B: 552
+[INFO] Struct - 552 groups in chain B
+[INFO] Struct - all groups in chain C: 552
+[INFO] Struct - 552 groups in chain C
+[INFO] Struct - all groups in chain D: 552
+[INFO] Struct - 552 groups in chain D
+[INFO] Protein - structure atoms: 22376
+[INFO] Protein - protein   atoms: 17584
+[INFO] Protein - ignoring ligands
+[INFO] FeatureSetup - enabledFeatures: [chem, volsite, protrusion, bfactor, atom_table]
+[INFO] Protein - SAS points: 25761
+[INFO] Protein - exposed protein atoms: 10679 of 17584
+[INFO] InstancePredictor - Creating WekaInstancePredictor
+[INFO] SLinkClusterer - clustering [2099] elements
+[INFO] SLinkClusterer - clusters: [id:26( 1 ), id:53( 2 ), id:68( 12 ), id:76( 1 ), id:78( 1 ), id:106( 1 ), id:124( 102 ), id:232( 2 ), id:253( 147 ), id:261( 1 ), id:262( 1 ), id:264( 2 ), id:273( 1 ), id:327( 2 ), id:328( 82 ), id:329( 1 ), id:339( 1 ), id:373( 1 ), id:394( 1 ), id:423( 4 ), id:424( 1 ), id:432( 118 ), id:443( 7 ), id:444( 1 ), id:452( 7 ), id:469( 10 ), id:481( 3 ), id:488( 23 ), id:490( 10 ), id:514( 2 ), id:521( 26 ), id:595( 12 ), id:619( 1 ), id:627( 21 ), id:637( 105 ), id:682( 1 ), id:711( 2 ), id:755( 1 ), id:788( 110 ), id:792( 3 ), id:793( 1 ), id:795( 4 ), id:796( 1 ), id:850( 1 ), id:861( 24 ), id:933( 2 ), id:934( 1 ), id:935( 1 ), id:952( 4 ), id:955( 1 ), id:956( 3 ), id:960( 1 ), id:963( 7 ), id:989( 80 ), id:992( 2 ), id:1006( 1 ), id:1007( 9 ), id:1020( 8 ), id:1027( 13 ), id:1029( 1 ), id:1035( 7 ), id:1036( 3 ), id:1037( 11 ), id:1066( 5 ), id:1117( 15 ), id:1158( 93 ), id:1182( 5 ), id:1212( 1 ), id:1304( 121 ), id:1309( 2 ), id:1310( 2 ), id:1358( 92 ), id:1379( 22 ), id:1399( 150 ), id:1427( 1 ), id:1457( 3 ), id:1458( 1 ), id:1482( 9 ), id:1490( 8 ), id:1508( 10 ), id:1519( 3 ), id:1532( 13 ), id:1552( 2 ), id:1553( 3 ), id:1555( 5 ), id:1557( 1 ), id:1562( 5 ), id:1610( 85 ), id:1612( 8 ), id:1615( 8 ), id:1618( 20 ), id:1628( 1 ), id:1636( 1 ), id:1653( 7 ), id:1672( 10 ), id:1705( 2 ), id:1707( 3 ), id:1806( 1 ), id:1819( 36 ), id:1830( 112 ), id:1835( 4 ), id:1836( 1 ), id:1841( 17 ), id:1857( 5 ), id:1910( 22 ), id:1986( 9 ), id:1987( 1 ), id:1989( 3 ), id:1991( 1 ), id:2010( 6 ), id:2019( 2 ), id:2020( 1 ), id:2024( 6 ), id:2052( 80 ), id:2055( 2 ), id:2067( 9 ), id:2076( 9 ), id:2079( 5 ), id:2086( 2 ), id:2087( 1 ), id:2093( 8 ), id:2096( 20 ), id:2097( 3 )]
+[INFO] SLinkClusterer - clusters together: 2099 / 2099
+[INFO] PocketPredictor - PREDICTING POCKETS.... ====================================
+[INFO] PocketPredictor - SAS POINTS: 25761
+[INFO] PocketPredictor - LIGANDABLE POINTS: 2099
+[INFO] PocketPredictor - CLUSTERS: 123
+[INFO] PocketPredictor - FILTERED CLUSTERS: 71
+[INFO] PocketPredictor - pocket 1 -  surf_atoms:  96   points: 118   score:   60.8
+[INFO] PocketPredictor - pocket 2 -  surf_atoms:  90   points: 121   score:   59.9
+[INFO] PocketPredictor - pocket 3 -  surf_atoms:  97   points: 110   score:   56.7
+[INFO] PocketPredictor - pocket 4 -  surf_atoms:  92   points: 112   score:   55.5
+[INFO] PocketPredictor - pocket 5 -  surf_atoms: 123   points: 150   score:   52.1
+[INFO] PocketPredictor - pocket 6 -  surf_atoms: 122   points: 147   score:   49.4
+[INFO] PocketPredictor - pocket 7 -  surf_atoms: 104   points: 102   score:   41.5
+[INFO] PocketPredictor - pocket 8 -  surf_atoms: 114   points: 105   score:   41.5
+[INFO] PocketPredictor - pocket 9 -  surf_atoms:  99   points:  92   score:   40.1
+[INFO] PocketPredictor - pocket10 -  surf_atoms:  85   points:  93   score:   39.9
+[INFO] PocketPredictor - pocket11 -  surf_atoms:  80   points:  82   score:   38.4
+[INFO] PocketPredictor - pocket12 -  surf_atoms:  55   points:  80   score:   36.9
+[INFO] PocketPredictor - pocket13 -  surf_atoms:  50   points:  80   score:   36.5
+[INFO] PocketPredictor - pocket14 -  surf_atoms:  87   points:  85   score:   34.8
+[INFO] PocketPredictor - pocket15 -  surf_atoms:  39   points:  36   score:   12.1
+[INFO] PocketPredictor - pocket16 -  surf_atoms:  43   points:  21   score:    9.8
+[INFO] PocketPredictor - pocket17 -  surf_atoms:  45   points:  26   score:    9.7
+[INFO] PocketPredictor - pocket18 -  surf_atoms:  47   points:  20   score:    8.6
+[INFO] PocketPredictor - pocket19 -  surf_atoms:  49   points:  20   score:    7.3
+[INFO] PocketPredictor - pocket20 -  surf_atoms:  37   points:  23   score:    7.2
+[INFO] PocketPredictor - pocket21 -  surf_atoms:  34   points:  24   score:    7.1
+[INFO] PocketPredictor - pocket22 -  surf_atoms:  36   points:  22   score:    6.7
+[INFO] PocketPredictor - pocket23 -  surf_atoms:  26   points:  15   score:    6.5
+[INFO] PocketPredictor - pocket24 -  surf_atoms:  31   points:  22   score:    6.5
+[INFO] PocketPredictor - pocket25 -  surf_atoms:  23   points:  12   score:    5.7
+[INFO] PocketPredictor - pocket26 -  surf_atoms:  31   points:  10   score:    5.5
+[INFO] PocketPredictor - pocket27 -  surf_atoms:  23   points:  17   score:    5.2
+[INFO] PocketPredictor - pocket28 -  surf_atoms:  34   points:  10   score:    5.1
+[INFO] PocketPredictor - pocket29 -  surf_atoms:  26   points:   9   score:    4.6
+[INFO] PocketPredictor - pocket30 -  surf_atoms:  26   points:  13   score:    4.5
+[INFO] PocketPredictor - pocket31 -  surf_atoms:  34   points:  11   score:    4.4
+[INFO] PocketPredictor - pocket32 -  surf_atoms:  23   points:  12   score:    4.1
+[INFO] PocketPredictor - pocket33 -  surf_atoms:  32   points:   8   score:    4.0
+[INFO] PocketPredictor - pocket34 -  surf_atoms:  18   points:   8   score:    4.0
+[INFO] PocketPredictor - pocket35 -  surf_atoms:  26   points:   8   score:    3.9
+[INFO] PocketPredictor - pocket36 -  surf_atoms:  19   points:  13   score:    3.8
+[INFO] PocketPredictor - pocket37 -  surf_atoms:  21   points:   9   score:    3.7
+[INFO] PocketPredictor - pocket38 -  surf_atoms:  20   points:  10   score:    3.6
+[INFO] PocketPredictor - pocket39 -  surf_atoms:  18   points:   5   score:    3.6
+[INFO] PocketPredictor - pocket40 -  surf_atoms:  10   points:   5   score:    3.3
+[INFO] PocketPredictor - pocket41 -  surf_atoms:  18   points:  10   score:    3.2
+[INFO] PocketPredictor - pocket42 -  surf_atoms:  20   points:   8   score:    3.1
+[INFO] PocketPredictor - pocket43 -  surf_atoms:  21   points:   7   score:    3.1
+[INFO] PocketPredictor - pocket44 -  surf_atoms:  26   points:   7   score:    3.0
+[INFO] PocketPredictor - pocket45 -  surf_atoms:  23   points:   8   score:    2.9
+[INFO] PocketPredictor - pocket46 -  surf_atoms:  22   points:   9   score:    2.8
+[INFO] PocketPredictor - pocket47 -  surf_atoms:  22   points:   6   score:    2.7
+[INFO] PocketPredictor - pocket48 -  surf_atoms:  22   points:   7   score:    2.7
+[INFO] PocketPredictor - pocket49 -  surf_atoms:  15   points:   7   score:    2.7
+[INFO] PocketPredictor - pocket50 -  surf_atoms:  26   points:   6   score:    2.6
+[INFO] PocketPredictor - pocket51 -  surf_atoms:  27   points:   7   score:    2.6
+[INFO] PocketPredictor - pocket52 -  surf_atoms:  14   points:   9   score:    2.5
+[INFO] PocketPredictor - pocket53 -  surf_atoms:  13   points:   5   score:    2.5
+[INFO] PocketPredictor - pocket54 -  surf_atoms:  13   points:   9   score:    2.4
+[INFO] PocketPredictor - pocket55 -  surf_atoms:  18   points:   5   score:    2.0
+[INFO] PocketPredictor - pocket56 -  surf_atoms:  17   points:   3   score:    2.0
+[INFO] PocketPredictor - pocket57 -  surf_atoms:   6   points:   3   score:    2.0
+[INFO] PocketPredictor - pocket58 -  surf_atoms:  25   points:   5   score:    2.0
+[INFO] PocketPredictor - pocket59 -  surf_atoms:  21   points:   4   score:    1.9
+[INFO] PocketPredictor - pocket60 -  surf_atoms:  18   points:   5   score:    1.8
+[INFO] PocketPredictor - pocket61 -  surf_atoms:  20   points:   4   score:    1.7
+[INFO] PocketPredictor - pocket62 -  surf_atoms:  13   points:   3   score:    1.7
+[INFO] PocketPredictor - pocket63 -  surf_atoms:  23   points:   4   score:    1.6
+[INFO] PocketPredictor - pocket64 -  surf_atoms:  16   points:   3   score:    1.5
+[INFO] PocketPredictor - pocket65 -  surf_atoms:  14   points:   3   score:    1.5
+[INFO] PocketPredictor - pocket66 -  surf_atoms:  20   points:   3   score:    1.5
+[INFO] PocketPredictor - pocket67 -  surf_atoms:  15   points:   3   score:    1.4
+[INFO] PocketPredictor - pocket68 -  surf_atoms:   8   points:   3   score:    1.4
+[INFO] PocketPredictor - pocket69 -  surf_atoms:  23   points:   3   score:    1.3
+[INFO] PocketPredictor - pocket70 -  surf_atoms:  13   points:   4   score:    1.2
+[INFO] PocketPredictor - pocket71 -  surf_atoms:  12   points:   3   score:    0.9
+[INFO] OldPymolRenderer - copying [D:\Dippy-dikky-dock\data\prepared_proteins\1cx2_20250809_000147_20250809_000543_prepared.pdbqt] to [data\p2rank_results\1cx2_20250809_000147_20250809_000543_prepared/visualizations/data/1cx2_20250809_000147_20250809_000543_prepared.pdbqt]
+[INFO] Console - predicting pockets finished in 0 hours 0 minutes 26.743 seconds
+[INFO] Console - results saved to directory [D:\Dippy-dikky-dock\data\p2rank_results\1cx2_20250809_000147_20250809_000543_prepared]
+[INFO] Console - 
+[INFO] Console - Finished successfully in 0 hours 0 minutes 29.043 seconds.
