@@ -1,0 +1,57 @@
+[INFO] Console - predicting pockets for proteins from dataset [6r8m_20250815_151033.pdb]
+[INFO] PredictPocketsRoutine - outdir: data\pocket_results\6r8m_20250815_151033\p2rank
+[INFO] FeatureSetup - enabledFeatures: [chem, volsite, protrusion, bfactor, atom_table]
+[INFO] Dataset - processing dataset [6r8m_20250815_151033.pdb] using 0 threads
+[INFO] Dataset - 
+------------------------------------------------------------------------------------------------------------------------
+processing [6r8m_20250815_151033.pdb] (1/1)
+------------------------------------------------------------------------------------------------------------------------
+
+[INFO] Console - processing [6r8m_20250815_151033.pdb] (1/1)
+[INFO] Protein - loading protein [D:\Dippy-dikky-dock\runs\20250815_151031\raw\6r8m_20250815_151033.pdb]
+[INFO] PdbUtils - loading file [runs\20250815_151031\raw\6r8m_20250815_151033.pdb]
+[INFO] Struct - all groups in chain A: 74
+[INFO] Struct - all groups in chain B: 78
+[INFO] Struct - all groups in chain C: 82
+[INFO] Struct - all groups in chain E: 73
+[INFO] Struct - all groups in chain F: 77
+[INFO] Struct - all groups in chain G: 83
+[INFO] Struct - all groups in chain A: 74
+[INFO] Struct - 74 groups in chain A
+[INFO] Struct - all groups in chain B: 78
+[INFO] Struct - 78 groups in chain B
+[INFO] Struct - all groups in chain C: 82
+[INFO] Struct - 82 groups in chain C
+[INFO] Struct - all groups in chain E: 73
+[INFO] Struct - 73 groups in chain E
+[INFO] Struct - all groups in chain F: 77
+[INFO] Struct - 77 groups in chain F
+[INFO] Struct - all groups in chain G: 83
+[INFO] Struct - 83 groups in chain G
+[INFO] Protein - structure atoms: 3858
+[INFO] Protein - protein   atoms: 3490
+[INFO] Protein - ignoring ligands
+[INFO] FeatureSetup - enabledFeatures: [chem, volsite, protrusion, bfactor, atom_table]
+[INFO] Protein - SAS points: 6946
+[INFO] Protein - exposed protein atoms: 2349 of 3490
+[INFO] InstancePredictor - Creating WekaInstancePredictor
+[INFO] SLinkClusterer - clustering [56] elements
+[INFO] SLinkClusterer - clusters: [id:7( 1 ), id:8( 8 ), id:14( 1 ), id:20( 3 ), id:22( 1 ), id:32( 13 ), id:34( 1 ), id:39( 12 ), id:46( 3 ), id:48( 3 ), id:49( 2 ), id:54( 8 )]
+[INFO] SLinkClusterer - clusters together: 56 / 56
+[INFO] PocketPredictor - PREDICTING POCKETS.... ====================================
+[INFO] PocketPredictor - SAS POINTS: 6946
+[INFO] PocketPredictor - LIGANDABLE POINTS: 56
+[INFO] PocketPredictor - CLUSTERS: 12
+[INFO] PocketPredictor - FILTERED CLUSTERS: 7
+[INFO] PocketPredictor - pocket 1 -  surf_atoms:  22   points:  13   score:    3.9
+[INFO] PocketPredictor - pocket 2 -  surf_atoms:  26   points:  12   score:    3.7
+[INFO] PocketPredictor - pocket 3 -  surf_atoms:  19   points:   8   score:    2.5
+[INFO] PocketPredictor - pocket 4 -  surf_atoms:  22   points:   8   score:    2.0
+[INFO] PocketPredictor - pocket 5 -  surf_atoms:  19   points:   3   score:    1.3
+[INFO] PocketPredictor - pocket 6 -  surf_atoms:  15   points:   3   score:    1.1
+[INFO] PocketPredictor - pocket 7 -  surf_atoms:   7   points:   3   score:    1.0
+[INFO] OldPymolRenderer - copying [D:\Dippy-dikky-dock\runs\20250815_151031\raw\6r8m_20250815_151033.pdb] to [data\pocket_results\6r8m_20250815_151033\p2rank/visualizations/data/6r8m_20250815_151033.pdb]
+[INFO] Console - predicting pockets finished in 0 hours 0 minutes 19.114 seconds
+[INFO] Console - results saved to directory [D:\Dippy-dikky-dock\data\pocket_results\6r8m_20250815_151033\p2rank]
+[INFO] Console - 
+[INFO] Console - Finished successfully in 0 hours 0 minutes 21.798 seconds.

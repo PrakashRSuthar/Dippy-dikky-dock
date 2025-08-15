@@ -11,135 +11,166 @@ class ProteinPreprocessor:
         if not self.pdb_path.exists():
             raise FileNotFoundError(f"PDB file not found: {self.pdb_path}")
         
-        # Simple output structure
         self.output_dir = Path("data/prepared_proteins")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Generate unique output filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_pdbqt = self.output_dir / f"{self.pdb_path.stem}_{timestamp}_prepared.pdbqt"
-    
-    def prepare_with_openbabel(self):
-        """Simple OpenBabel preparation - most reliable method"""
-        try:
-            print(f"[INFO] 🧬 Preparing protein receptor: {self.pdb_path.name}")
-            
-            cmd = [
-                "obabel", 
-                str(self.pdb_path),
-                "-O", str(self.output_pdbqt),
-                "-xr",  # Rigid receptor flag
-                "-p", "7.4",  # Add hydrogens at pH 7.4
-                "--partialcharge", "gasteiger"  # Add charges
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            
-            # Validate output
-            if self.output_pdbqt.exists() and self.output_pdbqt.stat().st_size > 0:
-                print(f"[INFO] ✅ Protein prepared successfully: {self.output_pdbqt}")
-                return str(self.output_pdbqt)
-            else:
-                raise Exception("Output file is empty or missing")
-                
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] ❌ OpenBabel failed: {e.stderr}")
-            return None
-        except FileNotFoundError:
-            print("[ERROR] ❌ OpenBabel not found. Install with: conda install -c conda-forge openbabel")
-            return None
-        except Exception as e:
-            print(f"[ERROR] ❌ Preparation failed: {e}")
-            return None
-    
-    def prepare_manual_fallback(self):
-        """Simple manual preparation without any complex dependencies"""
-        try:
-            print(f"[INFO] 🔧 Manual preparation fallback...")
-            
-            # Read original PDB and create basic PDBQT
-            with open(self.pdb_path, 'r') as infile, open(self.output_pdbqt, 'w') as outfile:
-                for line in infile:
-                    if line.startswith(('ATOM', 'HETATM')):
-                        # Extract coordinates and basic info
-                        if len(line) >= 54:
-                            # Simple atom type mapping
-                            atom_name = line[12:16].strip()
-                            element = atom_name[0] if atom_name else 'C'
-                            
-                            # Basic AutoDock atom type
-                            autodock_type = self.get_simple_atom_type(element)
-                            
-                            # Rebuild line with AutoDock atom type
-                            pdbqt_line = line[:78] + f"  {autodock_type:>2}\n"
-                            outfile.write(pdbqt_line)
-            
-            if self.output_pdbqt.exists() and self.output_pdbqt.stat().st_size > 0:
-                print(f"[INFO] ✅ Manual preparation completed: {self.output_pdbqt}")
-                return str(self.output_pdbqt)
-            else:
-                raise Exception("Manual preparation failed")
-                
-        except Exception as e:
-            print(f"[ERROR] ❌ Manual preparation failed: {e}")
-            return None
-    
-    def get_simple_atom_type(self, element):
-        """Simple atom type mapping for AutoDock"""
-        mapping = {
-            'C': 'C', 'N': 'N', 'O': 'O', 'S': 'S', 'P': 'P',
-            'H': 'H', 'F': 'F', 'I': 'I', 'B': 'B'
+
+    def _is_valid_pdbqt(self, pdbqt_path: Path) -> bool:
+        """Validate PDBQT has proper AutoDock atom types"""
+        if not pdbqt_path.exists() or pdbqt_path.stat().st_size < 100:
+            return False
+        
+        valid_types = {
+            "C", "A", "N", "NA", "NS", "OA", "OS", "F", "Mg", "MG", "P", "SA", "S", "Cl", "CL", 
+            "Ca", "CA", "Mn", "MN", "Fe", "FE", "Zn", "ZN", "Br", "BR", "I", "H", "HD", "HS"
         }
-        return mapping.get(element.upper(), 'C')
-    
+        
+        try:
+            total_atoms = 0
+            valid_atoms = 0
+            
+            with pdbqt_path.open() as f:
+                for line in f:
+                    if line.startswith(("ATOM", "HETATM")):
+                        total_atoms += 1
+                        if len(line) >= 79:
+                            atom_type = line[77:79].strip()
+                            if atom_type in valid_types:
+                                valid_atoms += 1
+            
+            return total_atoms > 0 and (valid_atoms / total_atoms) >= 0.9
+        except:
+            return False
+
+    def prepare_with_mgltools(self):
+        """Try MGLTools prepare_receptor4.py (most reliable)"""
+        try:
+            # Check for MGLTools/ADFR
+            mgl_utils = os.environ.get("MGLTOOLS_UTILS")
+            if not mgl_utils:
+                # Try common Windows locations
+                common_paths = [
+                    "C:/MGLTools/MGLToolsPckgs/AutoDockTools/Utilities24",
+                    "C:/ADFR/bin",
+                    "C:/Program Files/MGLTools/MGLToolsPckgs/AutoDockTools/Utilities24"
+                ]
+                for path in common_paths:
+                    if Path(path, "prepare_receptor4.py").exists():
+                        mgl_utils = path
+                        break
+            
+            if not mgl_utils:
+                return None
+                
+            script = Path(mgl_utils) / "prepare_receptor4.py"
+            if not script.exists():
+                return None
+            
+            # Try pythonsh first, then python
+            for interpreter in ["pythonsh", "python"]:
+                try:
+                    cmd = [interpreter, str(script), "-r", str(self.pdb_path), "-o", str(self.output_pdbqt)]
+                    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=300)
+                    
+                    if self._is_valid_pdbqt(self.output_pdbqt):
+                        print(f"[INFO] ✅ Protein prepared via MGLTools: {self.output_pdbqt}")
+                        return str(self.output_pdbqt)
+                    break
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    continue
+                    
+            return None
+        except Exception:
+            return None
+
+    def prepare_with_openbabel_advanced(self):
+        """Multiple OpenBabel strategies"""
+        strategies = [
+            # Strategy 1: Standard receptor preparation
+            ["obabel", str(self.pdb_path), "-O", str(self.output_pdbqt), "-xr", "-p", "7.4", "--partialcharge", "gasteiger"],
+            # Strategy 2: Alternative approach
+            ["obabel", str(self.pdb_path), "-O", str(self.output_pdbqt), "-h", "--partialcharge", "gasteiger"],
+            # Strategy 3: Simple conversion
+            ["obabel", str(self.pdb_path), "-O", str(self.output_pdbqt)]
+        ]
+        
+        for i, cmd in enumerate(strategies, 1):
+            try:
+                print(f"[INFO] 🧬 Trying OpenBabel strategy {i}...")
+                subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=300)
+                
+                if self._is_valid_pdbqt(self.output_pdbqt):
+                    print(f"[INFO] ✅ Protein prepared via OpenBabel (strategy {i}): {self.output_pdbqt}")
+                    return str(self.output_pdbqt)
+                    
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+                
+        return None
+
+    def prepare_with_pdb2pqr_fallback(self):
+        """Use PDB2PQR + manual PDBQT conversion as fallback"""
+        try:
+            # First, try to clean PDB and add hydrogens
+            temp_pqr = self.output_pdbqt.with_suffix('.pqr')
+            
+            # Simple hydrogen addition
+            cmd = ["obabel", str(self.pdb_path), "-O", str(temp_pqr), "-h", "-p", "7.4"]
+            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=300)
+            
+            if temp_pqr.exists():
+                # Convert PQR to PDBQT
+                cmd2 = ["obabel", str(temp_pqr), "-O", str(self.output_pdbqt)]
+                subprocess.run(cmd2, check=True, capture_output=True, text=True, timeout=300)
+                
+                if self._is_valid_pdbqt(self.output_pdbqt):
+                    print(f"[INFO] ✅ Protein prepared via PDB2PQR fallback: {self.output_pdbqt}")
+                    temp_pqr.unlink()  # cleanup
+                    return str(self.output_pdbqt)
+                    
+        except Exception:
+            pass
+            
+        return None
+
     def process(self):
-        """Main processing method - simple interface for integration"""
+        """Ultimate robust processing with multiple fallbacks"""
         print(f"[INFO] 🚀 Starting protein preparation...")
         
-        # Try OpenBabel first
-        result = self.prepare_with_openbabel()
+        # Method 1: MGLTools (most reliable for Vina)
+        result = self.prepare_with_mgltools()
         if result:
             return result
         
-        # Fallback to manual method
-        print("[INFO] 🔄 Trying fallback method...")
-        result = self.prepare_manual_fallback()
+        # Method 2: Advanced OpenBabel
+        result = self.prepare_with_openbabel_advanced()
         if result:
             return result
         
-        print("[ERROR] ❌ All preparation methods failed")
+        # Method 3: PDB2PQR fallback
+        result = self.prepare_with_pdb2pqr_fallback()
+        if result:
+            return result
+        
+        # STOP HERE - don't proceed with invalid files
+        print("[ERROR] ❌ All PDBQT preparation methods failed")
+        print("[SOLUTION] 💡 Install MGLTools or ADFR Suite for reliable receptor preparation:")
+        print("  1. Download MGLTools: http://mgltools.scripps.edu/")
+        print("  2. Or ADFR Suite: https://ccsb.scripps.edu/adfr/downloads/")
+        print("  3. Set MGLTOOLS_UTILS environment variable")
+        print("[ALTERNATIVE] 🔧 Fix OpenBabel installation:")
+        print("  conda uninstall openbabel")
+        print("  conda install -c conda-forge openbabel")
+        
         return None
-    
-    def get_info(self):
-        """Return basic info for UI integration"""
-        return {
-            'input_file': str(self.pdb_path),
-            'output_file': str(self.output_pdbqt),
-            'status': 'ready' if self.output_pdbqt.exists() else 'pending'
-        }
 
-# Simple function interface for easy integration
 def prepare_protein(pdb_file_path):
-    """Simple function interface - easy to call from main pipeline"""
+    """Bulletproof protein preparation"""
     try:
         processor = ProteinPreprocessor(pdb_file_path)
-        result = processor.process()
-        return result
+        return processor.process()
     except Exception as e:
         print(f"[ERROR] ❌ Protein preparation error: {e}")
         return None
-
-# Test function
-def test_protein_preparation():
-    """Test with a sample file"""
-    test_file = input("Enter PDB file path: ").strip()
-    result = prepare_protein(test_file)
-    
-    if result:
-        print(f"[SUCCESS] 🎉 Ready for docking: {result}")
-        print(f"[INFO] Output file: {result}")
-    else:
-        print("[FAILED] ❌ Preparation unsuccessful")
-
-if __name__ == "__main__":
-    test_protein_preparation()

@@ -1,0 +1,52 @@
+[INFO] Console - predicting pockets for proteins from dataset [4lde_20250814_144255.pdb]
+[INFO] PredictPocketsRoutine - outdir: data\pocket_results\4lde_20250814_144255\p2rank
+[INFO] FeatureSetup - enabledFeatures: [chem, volsite, protrusion, bfactor, atom_table]
+[INFO] Dataset - processing dataset [4lde_20250814_144255.pdb] using 0 threads
+[INFO] Dataset - 
+------------------------------------------------------------------------------------------------------------------------
+processing [4lde_20250814_144255.pdb] (1/1)
+------------------------------------------------------------------------------------------------------------------------
+
+[INFO] Console - processing [4lde_20250814_144255.pdb] (1/1)
+[INFO] Protein - loading protein [D:\Dippy-dikky-dock\runs\20250814_144252\raw\4lde_20250814_144255.pdb]
+[INFO] PdbUtils - loading file [runs\20250814_144252\raw\4lde_20250814_144255.pdb]
+[INFO] Struct - all groups in chain A: 454
+[INFO] Struct - all groups in chain B: 120
+[INFO] Struct - all groups in chain A: 454
+[INFO] Struct - 454 groups in chain A
+[INFO] Struct - all groups in chain B: 120
+[INFO] Struct - 120 groups in chain B
+[INFO] Protein - structure atoms: 4614
+[INFO] Protein - protein   atoms: 4394
+[INFO] Protein - ignoring ligands
+[INFO] FeatureSetup - enabledFeatures: [chem, volsite, protrusion, bfactor, atom_table]
+[INFO] Protein - SAS points: 8711
+[INFO] Protein - exposed protein atoms: 3020 of 4394
+[INFO] InstancePredictor - Creating WekaInstancePredictor
+[INFO] SLinkClusterer - clustering [204] elements
+[INFO] SLinkClusterer - clusters: [id:13( 12 ), id:15( 3 ), id:21( 4 ), id:28( 1 ), id:32( 1 ), id:40( 2 ), id:42( 2 ), id:43( 11 ), id:48( 1 ), id:88( 32 ), id:89( 1 ), id:90( 1 ), id:91( 3 ), id:92( 1 ), id:97( 25 ), id:103( 6 ), id:104( 8 ), id:127( 1 ), id:131( 1 ), id:141( 66 ), id:155( 1 ), id:170( 5 ), id:173( 2 ), id:176( 4 ), id:178( 6 ), id:182( 1 ), id:192( 3 )]
+[INFO] SLinkClusterer - clusters together: 204 / 204
+[INFO] PocketPredictor - PREDICTING POCKETS.... ====================================
+[INFO] PocketPredictor - SAS POINTS: 8711
+[INFO] PocketPredictor - LIGANDABLE POINTS: 204
+[INFO] PocketPredictor - CLUSTERS: 27
+[INFO] PocketPredictor - FILTERED CLUSTERS: 14
+[INFO] PocketPredictor - pocket 1 -  surf_atoms:  53   points:  66   score:   26.5
+[INFO] PocketPredictor - pocket 2 -  surf_atoms:  48   points:  32   score:   10.3
+[INFO] PocketPredictor - pocket 3 -  surf_atoms:  49   points:  25   score:    8.3
+[INFO] PocketPredictor - pocket 4 -  surf_atoms:  29   points:  12   score:    4.6
+[INFO] PocketPredictor - pocket 5 -  surf_atoms:  25   points:  11   score:    4.4
+[INFO] PocketPredictor - pocket 6 -  surf_atoms:  36   points:   8   score:    3.1
+[INFO] PocketPredictor - pocket 7 -  surf_atoms:  19   points:   6   score:    2.5
+[INFO] PocketPredictor - pocket 8 -  surf_atoms:  17   points:   5   score:    2.2
+[INFO] PocketPredictor - pocket 9 -  surf_atoms:  16   points:   6   score:    1.9
+[INFO] PocketPredictor - pocket10 -  surf_atoms:  11   points:   3   score:    1.8
+[INFO] PocketPredictor - pocket11 -  surf_atoms:  16   points:   3   score:    1.7
+[INFO] PocketPredictor - pocket12 -  surf_atoms:  13   points:   3   score:    1.6
+[INFO] PocketPredictor - pocket13 -  surf_atoms:  14   points:   4   score:    1.6
+[INFO] PocketPredictor - pocket14 -  surf_atoms:   5   points:   4   score:    1.1
+[INFO] OldPymolRenderer - copying [D:\Dippy-dikky-dock\runs\20250814_144252\raw\4lde_20250814_144255.pdb] to [data\pocket_results\4lde_20250814_144255\p2rank/visualizations/data/4lde_20250814_144255.pdb]
+[INFO] Console - predicting pockets finished in 0 hours 0 minutes 16.766 seconds
+[INFO] Console - results saved to directory [D:\Dippy-dikky-dock\data\pocket_results\4lde_20250814_144255\p2rank]
+[INFO] Console - 
+[INFO] Console - Finished successfully in 0 hours 0 minutes 19.146 seconds.
