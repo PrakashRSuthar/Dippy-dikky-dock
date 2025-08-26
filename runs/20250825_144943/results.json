@@ -1,0 +1,28 @@
+{
+  "job_id": "548a349d-113b-4c4e-8b47-68ad12c2608a",
+  "status": "completed",
+  "run_dir": "D:\\Dippy-dikky-dock\\runs\\20250825_144943",
+  "best_affinity": -0.0,
+  "total_poses": 9,
+  "pocket_method": "validated",
+  "pocket_center": [
+    15.614,
+    18.734,
+    46.022
+  ],
+  "pocket_size": [
+    20,
+    20,
+    20
+  ],
+  "confidence": "high",
+  "docked_file": "runs\\20250825_144943\\docking\\1hsg_20250825_144945_20250825_144947_Indinavir_docked.pdbqt",
+  "results_csv": "runs\\20250825_144943\\docking\\binding_scores.csv",
+  "files": {
+    "raw_protein": "runs\\20250825_144943\\raw\\1hsg_20250825_144945.pdb",
+    "prepared_protein": "data\\prepared_proteins\\1hsg_20250825_144945_20250825_144947_prepared.pdbqt",
+    "prepared_ligand": "runs\\20250825_144943\\prepared\\Indinavir.pdbqt",
+    "docked_poses": "runs\\20250825_144943\\docking\\1hsg_20250825_144945_20250825_144947_Indinavir_docked.pdbqt",
+    "results_csv": "runs\\20250825_144943\\docking\\binding_scores.csv"
+  }
+}
