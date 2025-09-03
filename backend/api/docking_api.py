@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime
 
 from modules.protein_fetcher import ProteinFetcher
-from modules.protein_preprocessor import prepare_protein
+from modules.protein_preprocessor import prepare_protein, ProteinPreprocessor
 from modules.ligand_preparer import process_ligand, _convert_to_pdbqt
 from modules.pocket_identifier import identify_binding_site
 from modules.docking_engine import DockingEngine
@@ -33,6 +33,13 @@ class DockingRequest(BaseModel):
     protein_input: str
     ligand_input: str
     job_name: Optional[str] = None
+    # NEW: Allow users to control cleaning
+    cleaning_policy: Optional[dict] = {
+        "keep_waters": False,
+        "keep_ions": True,
+        "keep_solvents": False, 
+        "keep_cofactors": True
+    }
 
 class JobStatus(BaseModel):
     job_id: str
@@ -69,7 +76,7 @@ class DockingPipeline:
         if self.status_callback:
             self.status_callback(job_id, status, progress, message)
     
-    def run_pipeline(self, job_id: str, protein_input: str, ligand_input: str):
+    def run_pipeline(self, job_id: str, protein_input: str, ligand_input: str, cleaning_policy: dict):
         try:
             self.update_status(job_id, "running", 10, "Setting up workspace...")
             
@@ -92,10 +99,27 @@ class DockingPipeline:
             # Resolve ligand
             prepared_ligand_pdbqt = self.resolve_ligand_input(ligand_input, raw_dir, prepared_dir)
             
-            self.update_status(job_id, "running", 40, "Preparing protein receptor...")
+            self.update_status(job_id, "running", 40, "Analyzing protein structure...")
+
+            # ENHANCED: First, analyze what's in the protein
+            analyzer = ProteinPreprocessor(raw_protein_path)
+            summary = analyzer.summarize_pdb(analyzer.pdb_path)
+
+            # Show analysis in status
+            analysis_msg = f"Found: {summary['waters']} waters, {summary['ions']} ions, {summary['solvents']} solvents, {summary['cofactors']} cofactors"
+            self.update_status(job_id, "running", 42, f"Protein analysis: {analysis_msg}")
+
+            # Use provided cleaning policy
+            policy_msg = f"Policy: Waters={'KEEP' if cleaning_policy['keep_waters'] else 'REMOVE'}, Ions={'KEEP' if cleaning_policy['keep_ions'] else 'REMOVE'}, Cofactors={'KEEP' if cleaning_policy['keep_cofactors'] else 'REMOVE'}"
+            self.update_status(job_id, "running", 45, policy_msg)
+
+            # ENHANCED: Prepare protein with explicit policy
+            prepared_protein_pdbqt = prepare_protein(
+                raw_protein_path, 
+                interactive=False,  # Never interactive in API
+                default_policy=cleaning_policy
+            )
             
-            # Prepare protein
-            prepared_protein_pdbqt = prepare_protein(raw_protein_path)
             if not prepared_protein_pdbqt:
                 raise Exception("Protein preparation failed")
             
@@ -155,6 +179,8 @@ class DockingPipeline:
                 "confidence": center["confidence"],
                 "docked_file": docked_file,
                 "results_csv": str(results_csv),
+                "cleaning_policy": cleaning_policy,  # NEW: Include policy in results
+                "protein_analysis": analysis_msg,  # NEW: Include analysis
                 "files": {
                     "raw_protein": raw_protein_path,
                     "prepared_protein": prepared_protein_pdbqt,
@@ -223,6 +249,14 @@ async def start_docking(request: DockingRequest):
     """Start a new docking job"""
     job_id = str(uuid.uuid4())
     
+    # Use user-provided policy or smart defaults
+    cleaning_policy = request.cleaning_policy or {
+        "keep_waters": False,
+        "keep_ions": True,
+        "keep_solvents": False, 
+        "keep_cofactors": True
+    }
+    
     # Create job entry
     jobs[job_id] = JobStatus(
         job_id=job_id,
@@ -239,7 +273,7 @@ async def start_docking(request: DockingRequest):
     
     thread = threading.Thread(
         target=pipeline.run_pipeline,
-        args=(job_id, request.protein_input, request.ligand_input)
+        args=(job_id, request.protein_input, request.ligand_input, cleaning_policy)
     )
     thread.daemon = True
     thread.start()

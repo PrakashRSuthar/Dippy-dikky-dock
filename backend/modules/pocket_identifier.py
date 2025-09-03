@@ -1,376 +1,464 @@
+# backend/modules/pocket_identifier.py
+# Enhanced pocket identification with configurable detail level and pipeline integration
+
 import os
+import sys
 import subprocess
-import pandas as pd
-from pathlib import Path
+import tempfile
 import json
-import math
-from typing import Optional, Tuple, Dict, Any, List
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional, Union
+import logging
 
-# --- CONFIGURATION ---
-SCRIPT_DIR = Path(__file__).parent
-TOOLS_DIR = SCRIPT_DIR.parent / "tools"
-# Windows-friendly: prank.bat; on Linux/macOS, prank.sh
-P2RANK_EXECUTABLE = TOOLS_DIR / "p2rank_2.4.2" / ("prank.bat" if os.name == "nt" else "prank.sh")
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Optional validated pockets for regression checks (you can extend this)
-VALIDATED_POCKETS = {
-    '1acj': {'center': (4.5, 67.0, 70.0), 'size': 22},
-    '3ks3': {'center': (15.2, 23.1, 2.4), 'size': 18},
-    '1hsg': {'center': (15.614, 18.734, 46.022), 'size': 20}
-}
-
-# Size constraints (Å)
-MIN_SIZE = 12.0
-MAX_SIZE = 36.0
-BASE_MARGIN_FACTOR = 0.55  # fraction of effective radius
-LOW_CONFIDENCE_INFLATE = 1.15
-HIGH_CONFIDENCE_DEFLATE = 0.9
-
-def _safe_float(x, default=None):
-    try:
-        return float(x)
-    except Exception:
-        return default
-
-def _distance(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
-    return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
-
-def _sphere_radius_from_volume(volume: float) -> float:
-    volume = max(volume, 1e-6)
-    return ((3.0 * volume) / (4.0 * math.pi)) ** (1.0 / 3.0)
-
-def _clamp(v, lo, hi):
-    return max(lo, min(v, hi))
 
 class PocketIdentifier:
-    def __init__(self, protein_pdb: Optional[str], protein_pdbqt: str, ligand_pdbqt: Optional[str] = None):
-        # Inputs
-        self.protein_pdb = Path(protein_pdb) if protein_pdb else None
-        self.protein_pdbqt = Path(protein_pdbqt)
-        self.ligand_pdbqt = Path(ligand_pdbqt) if ligand_pdbqt else None
-
-        # Validate docking-required files
-        if not self.protein_pdbqt.exists():
-            raise FileNotFoundError(f"Protein PDBQT not found: {self.protein_pdbqt}")
-        if self.protein_pdb and not self.protein_pdb.exists():
-            print(f"[WARN] Provided PDB not found: {self.protein_pdb} (will proceed without PDB)")
-
-        # Output dir
-        stem = (self.protein_pdb.stem if self.protein_pdb else self.protein_pdbqt.stem)
-        self.output_dir = Path("data/pocket_results") / stem
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        # P2Rank out
-        self.p2rank_out = self.output_dir / "p2rank"
-        self.p2rank_out.mkdir(parents=True, exist_ok=True)
-
-        # Other state
-        self.protein_bounds = None
-        self.protein_id = self._extract_protein_id(stem)
-
-    def _extract_protein_id(self, stem: str) -> str:
-        filename = stem.lower()
-        for pid in VALIDATED_POCKETS.keys():
-            if pid in filename:
-                return pid
-        return filename.split('_')[0] if '_' in filename else filename
-
-    # ----------------- Public API -----------------
-
-    def run(self, use_validated=True, return_n=1) -> Dict[str, Any]:
-        print("[INFO] Pocket identification started (no Fpocket)")
-
-        # 0) Validated shortcut for known benchmarks
-        if use_validated and self.protein_id in VALIDATED_POCKETS:
-            v = VALIDATED_POCKETS[self.protein_id]
-            return self._package([(v['center'][0], v['center'][1], v['center'][2], (v['size'], v['size'], v['size']), 0.99, 'validated')])
-
-        # 1) Ligand-aware from provided ligand file (preferred if aligned)
-        lig_center_file, lig_half_file = self._detect_ligand_from_file(self.ligand_pdbqt) if self.ligand_pdbqt else (None, None)
-
-        # 2) Optional HETATM anchoring from original PDB (if provided)
-        lig_center_het, lig_half_het = self._detect_ligand_from_pdb(self.protein_pdb) if self.protein_pdb else (None, None)
-
-        # 3) Run P2Rank on PDB if available; else skip
-        p2_df = None
-        if self.protein_pdb and self.protein_pdb.exists():
-            p2_csv = self._run_p2rank(self.protein_pdb)
-            p2_df = self._parse_p2rank(p2_csv) if p2_csv else None
-            self.protein_bounds = self._compute_bounds_from_structure(self.protein_pdb)
-        else:
-            # derive bounds from pdbqt
-            self.protein_bounds = self._compute_bounds_from_structure(self.protein_pdbqt)
-
-        # 4) Build candidates from P2Rank pockets (top-K)
-        candidates = self._p2rank_candidates(p2_df, top_k=max(3, return_n))
-
-        # 5) Adjust using ligand file if present; else HETATM if present
-        if lig_center_file and lig_half_file:
-            candidates = [self._adjust_to_include_ligand(c, lig_center_file, lig_half_file) for c in (candidates or [])]
-        elif lig_center_het and lig_half_het:
-            candidates = [self._adjust_to_include_ligand(c, lig_center_het, lig_half_het) for c in (candidates or [])]
-
-        # 6) If we have ligand but no P2Rank (no PDB), construct a ligand-centered box
-        if (not candidates) and (lig_center_file and lig_half_file):
-            sx = max(2*(lig_half_file[0]+3.0), MIN_SIZE)
-            sy = max(2*(lig_half_file[1]+3.0), MIN_SIZE)
-            sz = max(2*(lig_half_file[2]+3.0), MIN_SIZE)
-            c = (lig_center_file[0], lig_center_file[1], lig_center_file[2],
-                 (min(sx, MAX_SIZE), min(sy, MAX_SIZE), min(sz, MAX_SIZE)),
-                 0.7, "ligand_only")
-            candidates = [c]
-
-        # 7) Clamp to protein bounds
-        if candidates:
-            candidates = [self._clamp_to_bounds(c) for c in candidates]
-
-        # 8) Final fallback
-        if not candidates:
-            # If HETATM only
-            if lig_center_het and lig_half_het:
-                sx = max(2*(lig_half_het[0]+3.0), MIN_SIZE)
-                sy = max(2*(lig_half_het[1]+3.0), MIN_SIZE)
-                sz = max(2*(lig_half_het[2]+3.0), MIN_SIZE)
-                c = (lig_center_het[0], lig_center_het[1], lig_center_het[2],
-                     (min(sx, MAX_SIZE), min(sy, MAX_SIZE), min(sz, MAX_SIZE)),
-                     0.65, "hetatm_only")
-                candidates = [self._clamp_to_bounds(c)]
-            else:
-                candidates = [(0.0, 0.0, 0.0, (20.0, 20.0, 20.0), 0.3, "default")]
-
-        candidates = candidates[:return_n]
-        return self._package(candidates)
-
-    # ----------------- P2Rank -----------------
-
-    def _run_p2rank(self, pdb_path: Path) -> Optional[str]:
-        if not P2RANK_EXECUTABLE.is_file():
-            print(f"[WARN] P2Rank executable not found: {P2RANK_EXECUTABLE}")
-            return None
+    def __init__(self, detailed: bool = True):
+        """
+        Initialize pocket identifier with configurable detail level
+        
+        Args:
+            detailed: If True, uses comprehensive analysis (fpocket, P2Rank)
+                     If False, uses faster methods (template-based, geometric)
+        """
+        self.detailed = detailed
+        self.methods = ["fpocket", "p2rank", "template_based"] if detailed else ["template_based", "geometric"]
+        
+    def _run_fpocket(self, protein_pdb: str) -> List[Dict]:
+        """Run fpocket cavity detection (detailed mode only)"""
+        if not self.detailed:
+            return []
+            
         try:
-            cmd = [str(P2RANK_EXECUTABLE), "predict", "-f", str(pdb_path), "-o", str(self.p2rank_out)]
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
-            csv = self.p2rank_out / f"{pdb_path.name}_predictions.csv"
-            if csv.exists():
-                print("[INFO] P2Rank complete")
-                return str(csv)
-            print("[WARN] P2Rank predictions CSV not found")
-            return None
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] P2Rank failed: {e.stderr}")
-            return None
-
-    def _parse_p2rank(self, csv_path: str) -> Optional[pd.DataFrame]:
-        try:
-            df = pd.read_csv(csv_path)
-            df.columns = df.columns.str.strip()
-            need = ["rank", "center_x", "center_y", "center_z", "score", "volume"]
-            for col in need:
-                if col not in df.columns:
-                    df[col] = None
-            df["rank"] = pd.to_numeric(df["rank"], errors="coerce")
-            df["score"] = pd.to_numeric(df["score"], errors="coerce").fillna(0.5)
-            df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(120.0)
-            df = df.sort_values("rank").reset_index(drop=True)
-            return df
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_protein = Path(temp_dir) / "protein.pdb"
+                temp_protein.write_text(Path(protein_pdb).read_text())
+                
+                # Run fpocket
+                cmd = ["fpocket", "-f", str(temp_protein)]
+                result = subprocess.run(cmd, capture_output=True, text=True, cwd=temp_dir)
+                
+                if result.returncode != 0:
+                    logger.warning("fpocket failed, trying alternative detection")
+                    return []
+                
+                # Parse fpocket output
+                pockets = []
+                pocket_info_file = Path(temp_dir) / f"{temp_protein.stem}_info.txt"
+                
+                if pocket_info_file.exists():
+                    pockets = self._parse_fpocket_output(pocket_info_file)
+                
+                return pockets[:10]  # Return top 10 for later filtering
+                
         except Exception as e:
-            print(f"[ERROR] Parse P2Rank: {e}")
-            return None
+            logger.warning(f"fpocket execution failed: {e}")
+            return []
 
-    def _p2rank_candidates(self, p2_df: Optional[pd.DataFrame], top_k=3):
-        cands: List[Tuple] = []
-        if p2_df is None or p2_df.empty:
-            return cands
-
-        def pocket_tuple(cx, cy, cz, volume, score):
-            eff_r = _sphere_radius_from_volume(volume)
-            margin = BASE_MARGIN_FACTOR * eff_r
-            base = max(2*eff_r + 2*margin, 12.0)
-            size_scale = HIGH_CONFIDENCE_DEFLATE if score >= 0.7 else (LOW_CONFIDENCE_INFLATE if score <= 0.4 else 1.0)
-            size = _clamp(base * size_scale, MIN_SIZE, MAX_SIZE)
-            conf = min(0.95, 0.55 + 0.35*score)
-            return (float(cx), float(cy), float(cz), (size, size, size), conf, "p2rank")
-
-        for _, r in p2_df.head(top_k).iterrows():
-            cands.append(pocket_tuple(r["center_x"], r["center_y"], r["center_z"], _safe_float(r["volume"], 120.0), _safe_float(r["score"], 0.5)))
-
-        # De-duplicate close centers
-        dedup: List[Tuple] = []
-        for c in cands:
-            if all(_distance((c[0], c[1], c[2]), (d[0], d[1], d[2])) > 2.0 for d in dedup):
-                dedup.append(c)
-        return dedup
-
-    # ----------------- Ligand detection -----------------
-
-    def _detect_ligand_from_pdb(self, pdb_path: Optional[Path]) -> Tuple[Optional[Tuple[float,float,float]], Optional[Tuple[float,float,float]]]:
-        if not pdb_path or not pdb_path.exists():
-            return None, None
+    def _parse_fpocket_output(self, info_file: Path) -> List[Dict]:
+        """Parse fpocket info file to extract pocket information"""
+        pockets = []
         try:
-            het_coords = []
-            with pdb_path.open() as f:
-                for line in f:
-                    if line.startswith("HETATM"):
-                        resn = line[17:20].strip()
-                        if resn in {"HOH", "WAT", "NA", "CL", "K", "MG", "CA"}:
-                            continue
-                        x = _safe_float(line[30:38].strip())
-                        y = _safe_float(line[38:46].strip())
-                        z = _safe_float(line[46:54].strip())
-                        if x is not None and y is not None and z is not None:
-                            het_coords.append((x, y, z))
-            if not het_coords:
-                return None, None
-            xs, ys, zs = zip(*het_coords)
-            cx, cy, cz = sum(xs)/len(xs), sum(ys)/len(ys), sum(zs)/len(zs)
-            hx, hy, hz = (max(xs)-min(xs))/2.0 + 2.0, (max(ys)-min(ys))/2.0 + 2.0, (max(zs)-min(zs))/2.0 + 2.0
-            return (cx, cy, cz), (hx, hy, hz)
-        except Exception:
-            return None, None
+            with open(info_file) as f:
+                lines = f.readlines()
+            
+            current_pocket = {}
+            for line in lines:
+                line = line.strip()
+                if line.startswith("Pocket"):
+                    if current_pocket:
+                        pockets.append(current_pocket)
+                    current_pocket = {
+                        "method": "fpocket",
+                        "confidence": "high" if len(pockets) < 3 else "medium"
+                    }
+                elif "Centroid" in line and current_pocket:
+                    # Parse centroid coordinates
+                    coords = line.split()[-3:]
+                    current_pocket.update({
+                        "center_x": float(coords[0]),
+                        "center_y": float(coords[1]), 
+                        "center_z": float(coords[2])
+                    })
+                elif "Score" in line and current_pocket:
+                    # Parse pocket score
+                    score = float(line.split()[-1])
+                    current_pocket["score"] = score
+                elif "Volume" in line and current_pocket:
+                    # Parse pocket volume
+                    volume = float(line.split()[-1])
+                    current_pocket["pocket_size"] = volume
+                    # Estimate box size based on volume (cube root approximation)
+                    box_size = max(10, min(30, (volume/10)**(1/3) * 8))
+                    current_pocket.update({
+                        "size_x": box_size,
+                        "size_y": box_size,
+                        "size_z": box_size
+                    })
+            
+            if current_pocket:
+                pockets.append(current_pocket)
+                
+        except Exception as e:
+            logger.warning(f"Failed to parse fpocket output: {e}")
+        
+        return pockets
 
-    def _detect_ligand_from_file(self, lig_path: Optional[Path]) -> Tuple[Optional[Tuple[float,float,float]], Optional[Tuple[float,float,float]]]:
-        if not lig_path or not lig_path.exists():
-            return None, None
+    def _run_p2rank(self, protein_pdb: str) -> List[Dict]:
+        """Run P2Rank pocket prediction (detailed mode only)"""
+        if not self.detailed:
+            return []
+            
         try:
-            xs, ys, zs = [], [], []
-            with lig_path.open() as f:
-                for line in f:
-                    rec = line[:6].strip()
-                    if rec in {"ATOM", "HETATM"}:
-                        x = _safe_float(line[30:38].strip())
-                        y = _safe_float(line[38:46].strip())
-                        z = _safe_float(line[46:54].strip())
-                        if x is not None and y is not None and z is not None:
-                            xs.append(x); ys.append(y); zs.append(z)
-            if not xs:
-                return None, None
-            cx, cy, cz = sum(xs)/len(xs), sum(ys)/len(ys), sum(zs)/len(zs)
-            hx, hy, hz = (max(xs)-min(xs))/2.0 + 2.0, (max(ys)-min(ys))/2.0 + 2.0, (max(zs)-min(zs))/2.0 + 2.0
-            return (cx, cy, cz), (hx, hy, hz)
-        except Exception:
-            return None, None
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Try P2Rank if available
+                cmd = ["p2rank", "predict", protein_pdb, "-o", temp_dir]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    return []
+                
+                # Parse P2Rank output
+                predictions_file = Path(temp_dir) / "predictions.csv"
+                if not predictions_file.exists():
+                    return []
+                
+                return self._parse_p2rank_output(predictions_file)
+                
+        except Exception as e:
+            logger.warning(f"P2Rank execution failed: {e}")
+            return []
 
-    # ----------------- Bounds and adjustment -----------------
-
-    def _compute_bounds_from_structure(self, structure_path: Path) -> Optional[Tuple[Tuple[float,float,float], Tuple[float,float,float]]]:
+    def _parse_p2rank_output(self, predictions_file: Path) -> List[Dict]:
+        """Parse P2Rank predictions"""
+        pockets = []
         try:
-            xs, ys, zs = [], [], []
-            with structure_path.open() as f:
+            with open(predictions_file) as f:
+                lines = f.readlines()[1:]  # Skip header
+            
+            for i, line in enumerate(lines[:10]):  # Top 10 pockets
+                parts = line.strip().split(',')
+                if len(parts) >= 6:
+                    pocket = {
+                        "method": "p2rank",
+                        "center_x": float(parts[1]),
+                        "center_y": float(parts[2]),
+                        "center_z": float(parts[3]),
+                        "score": float(parts[4]),
+                        "pocket_size": float(parts[5]),
+                        "confidence": "high" if i < 2 else "medium"
+                    }
+                    # Estimate box size
+                    box_size = max(12, min(25, pocket["pocket_size"]/20))
+                    pocket.update({
+                        "size_x": box_size,
+                        "size_y": box_size,
+                        "size_z": box_size
+                    })
+                    pockets.append(pocket)
+                    
+        except Exception as e:
+            logger.warning(f"Failed to parse P2Rank output: {e}")
+        
+        return pockets
+
+    def _template_based_detection(self, protein_pdb: str, ligand_pdbqt: str) -> List[Dict]:
+        """Template-based pocket detection using ligand center (fast and detailed modes)"""
+        try:
+            # Parse ligand coordinates to find center
+            ligand_coords = []
+            with open(ligand_pdbqt) as f:
                 for line in f:
-                    if line.startswith("ATOM") or line.startswith("HETATM"):
-                        x = _safe_float(line[30:38].strip())
-                        y = _safe_float(line[38:46].strip())
-                        z = _safe_float(line[46:54].strip())
-                        if x is not None and y is not None and z is not None:
-                            xs.append(x); ys.append(y); zs.append(z)
-            if not xs:
-                return None
-            pad = 4.0
-            return ((min(xs)-pad, min(ys)-pad, min(zs)-pad), (max(xs)+pad, max(ys)+pad, max(zs)+pad))
-        except Exception:
-            return None
+                    if line.startswith(("ATOM", "HETATM")):
+                        coords = line[30:54].split()
+                        if len(coords) >= 3:
+                            ligand_coords.append([float(x) for x in coords[:3]])
+            
+            if not ligand_coords:
+                return []
+            
+            # Calculate ligand center
+            center_x = sum(coord[0] for coord in ligand_coords) / len(ligand_coords)
+            center_y = sum(coord[1] for coord in ligand_coords) / len(ligand_coords)
+            center_z = sum(coord[2] for coord in ligand_coords) / len(ligand_coords)
+            
+            # Create multiple binding modes around the ligand center
+            modes = []
+            
+            if self.detailed:
+                # Detailed mode: More variations
+                base_sizes = [
+                    (20, 20, 20), (18, 22, 18), (22, 18, 20), 
+                    (16, 20, 24), (24, 16, 18), (19, 21, 19),
+                    (21, 19, 21), (17, 23, 17)
+                ]
+            else:
+                # Fast mode: Fewer variations
+                base_sizes = [(20, 20, 20), (18, 22, 18), (22, 18, 20)]
+            
+            for i, (sx, sy, sz) in enumerate(base_sizes):
+                # Add slight variations to center coordinates
+                offset_x = (i - 2) * 1.5
+                offset_y = (i - 2) * 1.0
+                offset_z = (i - 2) * 0.8
+                
+                mode = {
+                    "method": "template_based",
+                    "center_x": center_x + offset_x,
+                    "center_y": center_y + offset_y,
+                    "center_z": center_z + offset_z,
+                    "size_x": sx,
+                    "size_y": sy,
+                    "size_z": sz,
+                    "pocket_size": sx * sy * sz / 8,  # Approximate pocket volume
+                    "score": 9.0 - i * 0.3,  # Decreasing scores
+                    "confidence": "high" if i < 2 else "medium"
+                }
+                modes.append(mode)
+            
+            return modes
+            
+        except Exception as e:
+            logger.warning(f"Template-based detection failed: {e}")
+            return []
 
-    def _adjust_to_include_ligand(self, candidate, lig_center, lig_half):
-        cx, cy, cz, (sx, sy, sz), conf, label = candidate
+    def _geometric_fallback(self, protein_pdb: str) -> List[Dict]:
+        """Geometric fallback method when other methods fail"""
+        try:
+            # Parse protein to find geometric center
+            protein_coords = []
+            with open(protein_pdb) as f:
+                for line in f:
+                    if line.startswith("ATOM") and line[12:16].strip() == "CA":  # Alpha carbons only
+                        coords = line[30:54].split()
+                        if len(coords) >= 3:
+                            protein_coords.append([float(x) for x in coords[:3]])
+            
+            if not protein_coords:
+                return []
+            
+            # Calculate geometric center
+            center_x = sum(coord[0] for coord in protein_coords) / len(protein_coords)
+            center_y = sum(coord[1] for coord in protein_coords) / len(protein_coords)
+            center_z = sum(coord[2] for coord in protein_coords) / len(protein_coords)
+            
+            # Create multiple geometric modes
+            modes = []
+            
+            if self.detailed:
+                # Detailed mode: More geometric variations
+                offsets = [
+                    (0, 0, 0), (5, 0, 0), (-5, 0, 0), (0, 5, 0), (0, -5, 0),
+                    (0, 0, 5), (0, 0, -5), (3, 3, 0), (-3, -3, 0)
+                ]
+                sizes = [
+                    (20, 20, 20), (18, 22, 18), (22, 18, 20), (16, 24, 16),
+                    (24, 16, 20), (19, 21, 19), (21, 19, 21), (17, 23, 17), (23, 17, 19)
+                ]
+            else:
+                # Fast mode: Basic geometric variations
+                offsets = [(0, 0, 0), (5, 0, 0), (-5, 0, 0)]
+                sizes = [(20, 20, 20), (18, 22, 18), (22, 18, 20)]
+            
+            for i, (offset, size) in enumerate(zip(offsets, sizes)):
+                mode = {
+                    "method": "geometric",
+                    "center_x": center_x + offset[0],
+                    "center_y": center_y + offset[1],
+                    "center_z": center_z + offset[2],
+                    "size_x": size[0],
+                    "size_y": size[1],
+                    "size_z": size[2],
+                    "pocket_size": size[0] * size[1] * size[2] / 10,
+                    "score": 7.0 - i * 0.2,
+                    "confidence": "medium" if i < 2 else "low"
+                }
+                modes.append(mode)
+            
+            return modes
+            
+        except Exception as e:
+            logger.warning(f"Geometric fallback failed: {e}")
+            return []
 
-        def inside():
-            return (abs(lig_center[0]-cx) <= sx/2.0 - lig_half[0] and
-                    abs(lig_center[1]-cy) <= sy/2.0 - lig_half[1] and
-                    abs(lig_center[2]-cz) <= sz/2.0 - lig_half[2])
 
-        if not inside():
-            dx, dy, dz = lig_center[0]-cx, lig_center[1]-cy, lig_center[2]-cz
-            # Nudge center toward ligand
-            cx += 0.5*dx; cy += 0.5*dy; cz += 0.5*dz
-            # Ensure ligand fits with margin
-            sx = max(sx, 2.0*(abs(lig_center[0]-cx) + lig_half[0] + 2.0))
-            sy = max(sy, 2.0*(abs(lig_center[1]-cy) + lig_half[1] + 2.0))
-            sz = max(sz, 2.0*(abs(lig_center[2]-cz) + lig_half[2] + 2.0))
-            sx, sy, sz = _clamp(sx, MIN_SIZE, MAX_SIZE), _clamp(sy, MIN_SIZE, MAX_SIZE), _clamp(sz, MIN_SIZE, MAX_SIZE)
-            label = label + "_ligadj"
-            conf = min(0.98, conf + 0.05)
-        return (cx, cy, cz, (sx, sy, sz), conf, label)
-
-    def _clamp_to_bounds(self, candidate):
-        if not self.protein_bounds:
-            return candidate
-        (xmin, ymin, zmin), (xmax, ymax, zmax) = self.protein_bounds
-        cx, cy, cz, (sx, sy, sz), conf, label = candidate
-        hx, hy, hz = sx/2.0, sy/2.0, sz/2.0
-        cx = _clamp(cx, xmin+hx, xmax-hx)
-        cy = _clamp(cy, ymin+hy, ymax-hy)
-        cz = _clamp(cz, zmin+hz, zmax-hz)
-        return (cx, cy, cz, (sx, sy, sz), conf, label)
-
-    # ----------------- Packaging -----------------
-
-    def _package(self, centers_sizes: List[Tuple[float,float,float,Tuple[float,float,float],float,str]]) -> Dict[str, Any]:
-        primary = centers_sizes[0]
-        out = {
-            "primary": {
-                "center_x": round(primary[0], 3),
-                "center_y": round(primary[1], 3),
-                "center_z": round(primary[2], 3),
-                "size_x": round(primary[3][0], 2),
-                "size_y": round(primary[3][1], 2),
-                "size_z": round(primary[3][2], 2),
-                "method": primary[5],
-                "confidence": "high" if primary[4] >= 0.75 else ("medium" if primary[4] >= 0.5 else "low"),
-                "confidence_score": round(primary[4], 3)
-            },
-            "alternatives": [
-                {
-                    "center_x": round(c[0], 3),
-                    "center_y": round(c[1], 3),
-                    "center_z": round(c[2], 3),
-                    "size_x": round(c[3][0], 2),
-                    "size_y": round(c[3][1], 2),
-                    "size_z": round(c[3][2], 2),
-                    "method": c[5],
-                    "confidence_score": round(c[4], 3)
-                } for c in centers_sizes[1:]
-            ],
-            "notes": "P2Rank-driven pockets with ligand-aware adjustment (from ligand file or HETATM if available)."
-        }
-        out_json = self.output_dir / "pocket_selection.json"
-        out_json.write_text(json.dumps(out, indent=2))
-        print("[INFO] Pocket selection saved:", out_json)
-        return out
-
-# -------- Convenience function --------
-
-def identify_binding_site(protein_pdb: Optional[str], protein_pdbqt: str, ligand_pdbqt: Optional[str], use_validated: bool = True, return_n: int = 1) -> Optional[Dict[str, Any]]:
-    try:
-        identifier = PocketIdentifier(protein_pdb, protein_pdbqt, ligand_pdbqt)
-        pocket_info = identifier.run(use_validated=use_validated, return_n=return_n)
-        p = pocket_info["primary"]
-        print(f"[INFO] Pocket (primary): center=({p['center_x']}, {p['center_y']}, {p['center_z']}), size=({p['size_x']}, {p['size_y']}, {p['size_z']}) Å, method={p['method']}, conf={p['confidence']} ({p['confidence_score']})")
-        return pocket_info
-    except Exception as e:
-        print(f"[ERROR] Pocket identification failed: {e}")
+def identify_binding_site(protein_pdb: str, prepared_protein_pdbqt: str, ligand_pdbqt: str = None, 
+                         use_validated: bool = True, return_n: int = 5, detailed: bool = True) -> Optional[Dict]:
+    """
+    Enhanced pocket identification with configurable detail level for production use.
+    
+    Args:
+        protein_pdb: Path to original protein PDB file
+        prepared_protein_pdbqt: Path to prepared receptor PDBQT file  
+        ligand_pdbqt: Path to ligand PDBQT file (optional, for template-based detection)
+        use_validated: Whether to use validated pocket detection methods
+        return_n: Number of top binding modes to return (max 5)
+        detailed: Control analysis depth (True = comprehensive, False = fast)
+    
+    Returns:
+        Dictionary containing:
+        - 'primary': Best binding mode with center coords, box size, pocket size
+        - 'modes': List of up to N best modes with full information
+        - 'total_found': Total number of pockets found before filtering
+        - 'methods_used': List of detection methods attempted
+        - 'analysis_level': Level of analysis performed ('detailed' or 'fast')
+    """
+    analysis_level = "detailed" if detailed else "fast"
+    logger.info(f"Starting {analysis_level} pocket identification")
+    
+    identifier = PocketIdentifier(detailed=detailed)
+    all_modes = []
+    methods_used = []
+    
+    # Method 1: fpocket (only in detailed mode with validation)
+    if detailed and use_validated:
+        logger.info("Attempting fpocket detection")
+        fpocket_modes = identifier._run_fpocket(protein_pdb)
+        if fpocket_modes:
+            all_modes.extend(fpocket_modes)
+            methods_used.append("fpocket")
+            logger.info(f"fpocket found {len(fpocket_modes)} pockets")
+    
+    # Method 2: P2Rank (only in detailed mode with validation)
+    if detailed and use_validated:
+        logger.info("Attempting P2Rank detection")
+        p2rank_modes = identifier._run_p2rank(protein_pdb)
+        if p2rank_modes:
+            all_modes.extend(p2rank_modes)
+            methods_used.append("p2rank")
+            logger.info(f"P2Rank found {len(p2rank_modes)} pockets")
+    
+    # Method 3: Template-based (available in both modes)
+    if ligand_pdbqt and Path(ligand_pdbqt).exists():
+        logger.info("Attempting template-based detection")
+        template_modes = identifier._template_based_detection(protein_pdb, ligand_pdbqt)
+        if template_modes:
+            all_modes.extend(template_modes)
+            methods_used.append("template_based")
+            logger.info(f"Template-based found {len(template_modes)} pockets")
+    
+    # Method 4: Geometric fallback (always available as last resort)
+    if not all_modes or (not detailed and len(all_modes) < 3):
+        logger.info("Using geometric fallback method")
+        geometric_modes = identifier._geometric_fallback(protein_pdb)
+        all_modes.extend(geometric_modes)
+        methods_used.append("geometric")
+        logger.info(f"Geometric fallback generated {len(geometric_modes)} pockets")
+    
+    if not all_modes:
+        logger.error("No binding sites could be identified")
         return None
+    
+    # Sort all modes by score (descending)
+    all_modes.sort(key=lambda x: x.get("score", 0), reverse=True)
+    
+    # Select best N modes (max 5)
+    best_modes = all_modes[:min(return_n, 5)]
+    
+    # Ensure all modes have required fields
+    for mode in best_modes:
+        if "pocket_size" not in mode:
+            mode["pocket_size"] = mode.get("size_x", 20) * mode.get("size_y", 20) * mode.get("size_z", 20) / 8
+        if "confidence" not in mode:
+            mode["confidence"] = "medium"
+        # Add analysis level to each mode
+        mode["analysis_level"] = analysis_level
+    
+    result = {
+        "primary": best_modes[0],
+        "modes": best_modes,
+        "total_found": len(all_modes),
+        "methods_used": methods_used,
+        "analysis_level": analysis_level,
+        "performance_mode": "comprehensive" if detailed else "optimized"
+    }
+    
+    logger.info(f"{analysis_level.title()} pocket identification completed: {len(best_modes)} modes selected from {len(all_modes)} total")
+    logger.info(f"Primary pocket: {best_modes[0]['method']} method, score: {best_modes[0].get('score', 'N/A')}")
+    
+    return result
+
+
+# Backward compatibility function
+def detect_binding_pockets(*args, **kwargs):
+    """Backward compatibility wrapper"""
+    return identify_binding_site(*args, **kwargs)
+
+
+# Pipeline integration helper
+def get_pocket_analysis_config(pipeline_mode: str = "production") -> Dict:
+    """
+    Get recommended pocket analysis configuration based on pipeline mode
+    
+    Args:
+        pipeline_mode: 'development', 'production', 'fast', or 'comprehensive'
+    
+    Returns:
+        Dictionary with recommended settings
+    """
+    configs = {
+        "development": {
+            "detailed": True,
+            "use_validated": True,
+            "return_n": 5
+        },
+        "production": {
+            "detailed": True,
+            "use_validated": True,
+            "return_n": 3
+        },
+        "fast": {
+            "detailed": False,
+            "use_validated": False,
+            "return_n": 3
+        },
+        "comprehensive": {
+            "detailed": True,
+            "use_validated": True,
+            "return_n": 5
+        }
+    }
+    
+    return configs.get(pipeline_mode, configs["production"])
+
 
 if __name__ == "__main__":
-    print("=== Pocket Identifier (Windows-friendly, no Fpocket) ===")
-    protein_pdb = input("Enter path to protein PDB (optional, improves accuracy if available): ").strip().strip('"')
-    protein_pdb = protein_pdb if protein_pdb else None
-    protein_pdbqt = input("Enter path to protein PDBQT (required): ").strip().strip('"')
-    ligand_pdbqt = input("Enter path to ligand PDBQT (required for docking; used for ligand-aware sizing): ").strip().strip('"')
-    ligand_pdbqt = ligand_pdbqt if ligand_pdbqt else None
-
-    if not protein_pdbqt or not Path(protein_pdbqt).exists():
-        print("❌ Receptor PDBQT is required and must exist.")
-        raise SystemExit(1)
-
-    result = identify_binding_site(protein_pdb, protein_pdbqt, ligand_pdbqt, use_validated=True, return_n=2)
-    if result:
-        p = result["primary"]
-        print("\nVina config (example):")
-        print(f"center_x = {p['center_x']}")
-        print(f"center_y = {p['center_y']}")
-        print(f"center_z = {p['center_z']}")
-        print(f"size_x = {p['size_x']}")
-        print(f"size_y = {p['size_y']}")
-        print(f"size_z = {p['size_z']}")
-        print("\nRun Vina with:")
-        print("vina --receptor receptor.pdbqt --ligand ligand.pdbqt --config box.txt --exhaustiveness 16 --out out.pdbqt")
+    # Test the module with different modes
+    print("Testing pocket identifier in different modes...")
+    
+    # Fast mode test
+    print("\n--- FAST MODE TEST ---")
+    config = get_pocket_analysis_config("fast")
+    print(f"Fast mode config: {config}")
+    
+    # Production mode test
+    print("\n--- PRODUCTION MODE TEST ---")
+    config = get_pocket_analysis_config("production")
+    print(f"Production mode config: {config}")
+    
+    # Comprehensive mode test
+    print("\n--- COMPREHENSIVE MODE TEST ---")
+    config = get_pocket_analysis_config("comprehensive")
+    print(f"Comprehensive mode config: {config}")
+    
+    # Example usage
+    if len(sys.argv) >= 4:
+        protein_pdb = sys.argv[1]
+        prepared_pdbqt = sys.argv[2]
+        ligand_pdbqt = sys.argv[3]
+        mode = sys.argv[4] if len(sys.argv) > 4 else "production"
+        
+        config = get_pocket_analysis_config(mode)
+        result = identify_binding_site(
+            protein_pdb, prepared_pdbqt, ligand_pdbqt, **config
+        )
+        
+        if result:
+            print(f"\n--- RESULTS ({result['analysis_level'].upper()} MODE) ---")
+            print(json.dumps(result, indent=2, default=str))
+    else:
+        print("\nUsage: python pocket_identifier.py <protein.pdb> <prepared.pdbqt> <ligand.pdbqt> [mode]")
+        print("Modes: fast, production, comprehensive, development")
