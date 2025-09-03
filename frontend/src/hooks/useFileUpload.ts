@@ -16,7 +16,7 @@ export const useFileUpload = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch(`${import.meta.env.VITE_API_BASE}/api/upload/${type}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/api/upload/${type}`, {
         method: 'POST',
         body: formData,
       });

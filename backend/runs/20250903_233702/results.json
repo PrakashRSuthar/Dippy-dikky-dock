@@ -1,0 +1,35 @@
+{
+  "job_id": "72f3e99d-1f3a-4e55-a1d5-db1982804527",
+  "status": "completed",
+  "run_dir": "D:\\Dippy-dikky-dock\\backend\\runs\\20250903_233702",
+  "best_affinity": -4.5,
+  "total_poses": 9,
+  "pocket_method": "template_based",
+  "pocket_center": [
+    1.7835714285714284,
+    -2.1942857142857144,
+    -1.6
+  ],
+  "pocket_size": [
+    20,
+    20,
+    20
+  ],
+  "confidence": "high",
+  "docked_file": "runs\\20250903_233702\\docking\\1hsg_20250903_233704_20250903_233705_aspirin_docked.pdbqt",
+  "results_csv": "runs\\20250903_233702\\docking\\binding_scores.csv",
+  "cleaning_policy": {
+    "keep_waters": false,
+    "keep_ions": true,
+    "keep_solvents": false,
+    "keep_cofactors": true
+  },
+  "protein_analysis": "Found: 127 waters, 0 ions, 0 solvents, 0 cofactors",
+  "files": {
+    "raw_protein": "runs\\20250903_233702\\raw\\1hsg_20250903_233704.pdb",
+    "prepared_protein": "data\\prepared_proteins\\1hsg_20250903_233704_20250903_233705_prepared.pdbqt",
+    "prepared_ligand": "runs\\20250903_233702\\prepared\\aspirin.pdbqt",
+    "docked_poses": "runs\\20250903_233702\\docking\\1hsg_20250903_233704_20250903_233705_aspirin_docked.pdbqt",
+    "results_csv": "runs\\20250903_233702\\docking\\binding_scores.csv"
+  }
+}

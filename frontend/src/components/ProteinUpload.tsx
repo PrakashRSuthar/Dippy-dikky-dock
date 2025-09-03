@@ -3,35 +3,44 @@ import { useState } from 'react';
 import { Settings, Activity, Upload, Atom } from 'lucide-react';
 import { useApiHealth } from '../hooks/useApiHealth';
 import { useFileUpload } from '../hooks/useFileUpload';
+import { useDocking } from '../hooks/useDocking';
 import { MoleculeVisualization } from './MoleculeVisualization';
 
 interface ProteinUploadProps {
-  onMoleculesPaired: (proteinInput: string, ligandInput: string) => void;
+  onDockingStarted: (jobId: string) => void;
 }
 
-export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
+export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
   const [showSettings, setShowSettings] = useState(false);
   
   // Protein state
   const [activeProteinTab, setActiveProteinTab] = useState<'database' | 'upload'>('database');
-  const [proteinId, setProteinId] = useState('');
-  const [proteinInput, setProteinInput] = useState<string>(''); // This goes to backend
+  const [proteinId, setProteinId] = useState('1HSG'); // Pre-fill example
+  const [proteinInput, setProteinInput] = useState<string>('');
   const [proteinSource, setProteinSource] = useState<'database' | 'upload' | null>(null);
   
   // Ligand state
   const [activeLigandTab, setActiveLigandTab] = useState<'database' | 'upload'>('database');
-  const [ligandId, setLigandId] = useState('');
-  const [ligandInput, setLigandInput] = useState<string>(''); // This goes to backend
+  const [ligandId, setLigandId] = useState('aspirin'); // Pre-fill example
+  const [ligandInput, setLigandInput] = useState<string>('');
   const [ligandSource, setLigandSource] = useState<'database' | 'upload' | null>(null);
+  
+  // Retention policy state
+  const [retentionPolicy, setRetentionPolicy] = useState<'save' | 'delete' | 'keep7d'>('keep7d');
 
   const { isHealthy, isChecking } = useApiHealth();
   const { uploadFile, isUploading, uploadedFileName } = useFileUpload();
+  const { startDocking, isStarting } = useDocking();
 
   // Protein handlers
   const handleProteinFileUpload = async (file: File) => {
+    if (!isHealthy) {
+      alert('Backend not connected. Please start your FastAPI server.');
+      return;
+    }
     const result = await uploadFile(file, 'protein');
     if (result?.file_path) {
-      setProteinInput(result.file_path); // Backend expects file_path
+      setProteinInput(result.file_path);
       setProteinSource('upload');
     }
   };
@@ -51,16 +60,20 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
 
   const handleProteinDatabase = () => {
     if (proteinId.trim().length >= 4) {
-      setProteinInput(proteinId.trim()); // Backend expects ID string
+      setProteinInput(proteinId.trim());
       setProteinSource('database');
     }
   };
 
   // Ligand handlers  
   const handleLigandFileUpload = async (file: File) => {
+    if (!isHealthy) {
+      alert('Backend not connected. Please start your FastAPI server.');
+      return;
+    }
     const result = await uploadFile(file, 'ligand');
     if (result?.file_path) {
-      setLigandInput(result.file_path); // Backend expects file_path
+      setLigandInput(result.file_path);
       setLigandSource('upload');
     }
   };
@@ -80,19 +93,35 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
 
   const handleLigandDatabase = () => {
     if (ligandId.trim().length >= 2) {
-      setLigandInput(ligandId.trim()); // Backend expects ID string
+      setLigandInput(ligandId.trim());
       setLigandSource('database');
     }
   };
 
-  // Continue to docking when both molecules are ready
-  const canProceed = proteinInput && ligandInput;
-  const handleProceedToDocking = () => {
-    if (canProceed) {
-      onMoleculesPaired(proteinInput, ligandInput);
+  // Start Docking Process
+  const handleStartDocking = async () => {
+    if (!proteinInput || !ligandInput) return;
+    
+    const dockingRequest = {
+      protein_input: proteinInput,
+      ligand_input: ligandInput,
+      job_name: `${proteinInput}_${ligandInput}_${Date.now()}`,
+      cleaning_policy: {
+        keep_waters: false,
+        keep_ions: true,
+        keep_solvents: false,
+        keep_cofactors: true
+      },
+      retention: retentionPolicy  // Include retention policy
+    };
+
+    const jobId = await startDocking(dockingRequest);
+    if (jobId) {
+      onDockingStarted(jobId);
     }
   };
 
+  const canProceed = proteinInput && ligandInput && isHealthy;
   const isValidProteinId = proteinId.trim().length >= 4;
   const isValidLigandId = ligandId.trim().length >= 2;
 
@@ -113,7 +142,7 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
               isChecking ? 'bg-yellow-400 animate-pulse' : isHealthy ? 'bg-green-400' : 'bg-red-400'
             }`} />
             <span className="text-xs text-gray-600">
-              {isChecking ? 'Checking...' : isHealthy ? 'System OK' : 'System Error'}
+              {isChecking ? 'Checking...' : isHealthy ? 'System OK' : 'Backend Offline'}
             </span>
           </div>
         </div>
@@ -126,34 +155,25 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
         </button>
       </div>
 
-      {/* Steps */}
-      <div className="flex items-center space-x-8 mb-8">
-        <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-            <Upload className="w-4 h-4 text-white" />
+      {/* Backend Status */}
+      {!isHealthy && (
+        <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <div className="flex items-center space-x-2">
+            <span className="text-yellow-600">ℹ️</span>
+            <div>
+              <h3 className="text-yellow-800 font-medium">Backend Required for Docking</h3>
+              <p className="text-yellow-700 text-sm">
+                Start backend: <code className="bg-yellow-100 px-1 rounded">python api/docking_api.py</code>
+              </p>
+            </div>
           </div>
-          <span className="font-medium text-blue-600">Upload</span>
         </div>
-        <div className="flex-1 h-px bg-gray-300" />
-        <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
-            <span className="text-xs">⚡</span>
-          </div>
-          <span className="text-gray-500">Docking</span>
-        </div>
-        <div className="flex-1 h-px bg-gray-300" />
-        <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
-            <span className="text-xs">📊</span>
-          </div>
-          <span className="text-gray-500">Results</span>
-        </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Column: Protein & Ligand Upload */}
+        {/* Left Column: Protein Upload & Visualization */}
         <div className="space-y-6">
-          {/* Protein Section */}
+          {/* Protein Upload */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-6 py-4 border-b">
               <h2 className="text-lg font-semibold flex items-center space-x-2">
@@ -161,26 +181,26 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
                 <span>Protein Structure</span>
                 {proteinInput && <span className="text-green-600">✅</span>}
               </h2>
-              <p className="text-sm text-gray-600 mt-1">Upload protein structure or fetch from PDB/AlphaFold</p>
+              <p className="text-sm text-gray-600 mt-1">Upload or fetch from database</p>
             </div>
 
             <div className="flex border-b">
               <button
                 onClick={() => setActiveProteinTab('database')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 ${
+                className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 ${
                   activeProteinTab === 'database'
                     ? 'text-blue-600 border-blue-600 bg-blue-50'
-                    : 'text-gray-600 border-transparent hover:text-gray-900'
+                    : 'text-gray-600 border-transparent'
                 }`}
               >
                 Database
               </button>
               <button
                 onClick={() => setActiveProteinTab('upload')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 ${
+                className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 ${
                   activeProteinTab === 'upload'
                     ? 'text-blue-600 border-blue-600 bg-blue-50'
-                    : 'text-gray-600 border-transparent hover:text-gray-900'
+                    : 'text-gray-600 border-transparent'
                 }`}
               >
                 Upload
@@ -198,7 +218,7 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-center font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <div className="text-xs text-gray-500 mt-2 text-center">
-                    PDB ID (1HSG) or UniProt ID (P12345)
+                    PDB ID or UniProt ID
                   </div>
                   <button
                     onClick={handleProteinDatabase}
@@ -209,18 +229,22 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
                         : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                     }`}
                   >
-                    Fetch Protein
+                    Use Protein ID
                   </button>
                 </div>
               )}
 
               {activeProteinTab === 'upload' && (
                 <div
-                  className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-gray-400 transition-colors"
+                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+                    isHealthy 
+                      ? 'border-gray-300 hover:border-gray-400' 
+                      : 'border-gray-200 bg-gray-50'
+                  }`}
                   onDrop={handleProteinDrop}
                   onDragOver={(e) => e.preventDefault()}
                 >
-                  <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                  <Upload className={`w-8 h-8 mx-auto mb-2 ${isHealthy ? 'text-gray-400' : 'text-gray-300'}`} />
                   <p className="text-sm text-gray-600 mb-2">Drop PDB/PDBQT files here</p>
                   <input
                     type="file"
@@ -228,14 +252,18 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
                     onChange={handleProteinFileSelect}
                     className="hidden"
                     id="protein-file"
+                    disabled={!isHealthy}
                   />
                   <label
                     htmlFor="protein-file"
-                    className="inline-flex items-center px-3 py-1 border border-gray-300 rounded-md bg-white text-sm cursor-pointer hover:bg-gray-50"
+                    className={`inline-flex items-center px-3 py-1 border border-gray-300 rounded-md bg-white text-sm ${
+                      isHealthy ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-50'
+                    }`}
                   >
-                    Browse
+                    Browse Files
                   </label>
                   {isUploading && <div className="mt-2 text-xs text-blue-600">Uploading...</div>}
+                  {!isHealthy && <div className="mt-2 text-xs text-red-600">Backend required for uploads</div>}
                 </div>
               )}
 
@@ -243,16 +271,36 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
                 <div className="mt-4 p-3 bg-green-50 rounded-lg">
                   <div className="text-sm text-green-800 flex items-center space-x-2">
                     <span>✅</span>
-                    <span>
-                      Protein ready: {proteinSource === 'upload' ? uploadedFileName : proteinInput}
-                    </span>
+                    <span>Ready: {proteinSource === 'upload' ? uploadedFileName : proteinInput}</span>
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Ligand Section */}
+          {/* Protein Visualization */}
+          <div className="bg-white rounded-xl border shadow-sm">
+            <div className="px-6 py-4 border-b">
+              <h3 className="text-lg font-semibold flex items-center space-x-2">
+                <span>🔬</span>
+                <span>Protein Preview</span>
+              </h3>
+            </div>
+            <div className="p-6">
+              <div className="h-64 border border-gray-200 rounded-lg bg-gray-50">
+                <MoleculeVisualization 
+                  moleculePath={proteinInput}
+                  moleculeType="protein"
+                  color="#3b82f6"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Ligand Upload & Visualization */}
+        <div className="space-y-6">
+          {/* Ligand Upload */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-6 py-4 border-b">
               <h2 className="text-lg font-semibold flex items-center space-x-2">
@@ -260,26 +308,26 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
                 <span>Ligand Structure</span>
                 {ligandInput && <span className="text-green-600">✅</span>}
               </h2>
-              <p className="text-sm text-gray-600 mt-1">Upload ligand or fetch from PubChem database</p>
+              <p className="text-sm text-gray-600 mt-1">Upload or fetch from PubChem</p>
             </div>
 
             <div className="flex border-b">
               <button
                 onClick={() => setActiveLigandTab('database')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 ${
+                className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 ${
                   activeLigandTab === 'database'
                     ? 'text-green-600 border-green-600 bg-green-50'
-                    : 'text-gray-600 border-transparent hover:text-gray-900'
+                    : 'text-gray-600 border-transparent'
                 }`}
               >
                 PubChem
               </button>
               <button
                 onClick={() => setActiveLigandTab('upload')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 ${
+                className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 ${
                   activeLigandTab === 'upload'
                     ? 'text-green-600 border-green-600 bg-green-50'
-                    : 'text-gray-600 border-transparent hover:text-gray-900'
+                    : 'text-gray-600 border-transparent'
                 }`}
               >
                 Upload
@@ -293,11 +341,11 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
                     type="text"
                     value={ligandId}
                     onChange={(e) => setLigandId(e.target.value)}
-                    placeholder="Aspirin or 2244"
+                    placeholder="aspirin or 2244"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-center font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
                   />
                   <div className="text-xs text-gray-500 mt-2 text-center">
-                    Compound name (Aspirin) or PubChem CID (2244)
+                    Compound name or CID
                   </div>
                   <button
                     onClick={handleLigandDatabase}
@@ -308,18 +356,22 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
                         : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                     }`}
                   >
-                    Fetch Ligand
+                    Use Ligand ID
                   </button>
                 </div>
               )}
 
               {activeLigandTab === 'upload' && (
                 <div
-                  className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-gray-400 transition-colors"
+                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+                    isHealthy 
+                      ? 'border-gray-300 hover:border-gray-400' 
+                      : 'border-gray-200 bg-gray-50'
+                  }`}
                   onDrop={handleLigandDrop}
                   onDragOver={(e) => e.preventDefault()}
                 >
-                  <Atom className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                  <Atom className={`w-8 h-8 mx-auto mb-2 ${isHealthy ? 'text-gray-400' : 'text-gray-300'}`} />
                   <p className="text-sm text-gray-600 mb-2">Drop SDF/MOL/MOL2 files here</p>
                   <input
                     type="file"
@@ -327,13 +379,17 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
                     onChange={handleLigandFileSelect}
                     className="hidden"
                     id="ligand-file"
+                    disabled={!isHealthy}
                   />
                   <label
                     htmlFor="ligand-file"
-                    className="inline-flex items-center px-3 py-1 border border-gray-300 rounded-md bg-white text-sm cursor-pointer hover:bg-gray-50"
+                    className={`inline-flex items-center px-3 py-1 border border-gray-300 rounded-md bg-white text-sm ${
+                      isHealthy ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-50'
+                    }`}
                   >
-                    Browse
+                    Browse Files
                   </label>
+                  {!isHealthy && <div className="mt-2 text-xs text-red-600">Backend required for uploads</div>}
                 </div>
               )}
 
@@ -341,55 +397,135 @@ export const ProteinUpload = ({ onMoleculesPaired }: ProteinUploadProps) => {
                 <div className="mt-4 p-3 bg-green-50 rounded-lg">
                   <div className="text-sm text-green-800 flex items-center space-x-2">
                     <span>✅</span>
-                    <span>
-                      Ligand ready: {ligandSource === 'upload' ? uploadedFileName : ligandInput}
-                    </span>
+                    <span>Ready: {ligandSource === 'upload' ? uploadedFileName : ligandInput}</span>
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Proceed Button */}
-          <button
-            onClick={handleProceedToDocking}
-            disabled={!canProceed}
-            className={`w-full py-4 px-6 rounded-xl font-semibold text-lg transition-colors ${
-              canProceed
-                ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
-                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-            }`}
-          >
-            {canProceed ? '⚡ Start Molecular Docking' : 'Select Protein & Ligand to Continue'}
-          </button>
-        </div>
-
-        {/* Right Column: 3D Visualization */}
-        <div className="bg-white rounded-xl border shadow-sm">
-          <div className="px-6 py-4 border-b">
-            <h2 className="text-lg font-semibold flex items-center space-x-2">
-              <span>🔬</span>
-              <span>3D Structure Preview</span>
-            </h2>
-            <p className="text-sm text-gray-600 mt-1">Interactive molecular visualization</p>
-          </div>
-          <div className="p-6">
-            <div className="h-96 bg-gray-50 rounded-lg flex items-center justify-center">
-              {proteinInput || ligandInput ? (
+          {/* Ligand Visualization */}
+          <div className="bg-white rounded-xl border shadow-sm">
+            <div className="px-6 py-4 border-b">
+              <h3 className="text-lg font-semibold flex items-center space-x-2">
+                <span>⚗️</span>
+                <span>Ligand Preview</span>
+              </h3>
+            </div>
+            <div className="p-6">
+              <div className="h-64 border border-gray-200 rounded-lg bg-gray-50">
                 <MoleculeVisualization 
-                  proteinPath={proteinInput}
-                  ligandPath={ligandInput}
+                  moleculePath={ligandInput}
+                  moleculeType="ligand"
+                  color="#10b981"
                 />
-              ) : (
-                <div className="text-center text-gray-500">
-                  <div className="w-16 h-16 mx-auto mb-4 opacity-30">🧬</div>
-                  <p>Select a protein or ligand to view 3D structure</p>
-                </div>
-              )}
+              </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Data Retention Policy Selection */}
+      {canProceed && (
+        <div className="mt-8 bg-white rounded-xl border shadow-sm p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center space-x-2">
+            <span>💾</span>
+            <span>Data Retention Policy</span>
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Choose what to do with generated files after docking completes:
+          </p>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <label className="flex items-start space-x-3 cursor-pointer p-4 border-2 rounded-lg transition-colors hover:bg-gray-50">
+              <input
+                type="radio"
+                name="retention"
+                value="save"
+                checked={retentionPolicy === 'save'}
+                onChange={(e) => setRetentionPolicy(e.target.value as any)}
+                className="mt-1"
+              />
+              <div>
+                <div className="font-medium flex items-center space-x-2">
+                  <span>💾</span>
+                  <span>Save Permanently</span>
+                </div>
+                <div className="text-sm text-gray-600 mt-1">
+                  Move all files to permanent storage in data/results/
+                </div>
+              </div>
+            </label>
+            
+            <label className="flex items-start space-x-3 cursor-pointer p-4 border-2 rounded-lg transition-colors hover:bg-gray-50">
+              <input
+                type="radio"
+                name="retention"
+                value="keep7d"
+                checked={retentionPolicy === 'keep7d'}
+                onChange={(e) => setRetentionPolicy(e.target.value as any)}
+                className="mt-1"
+              />
+              <div>
+                <div className="font-medium flex items-center space-x-2">
+                  <span>⏳</span>
+                  <span>Keep Temporarily</span>
+                </div>
+                <div className="text-sm text-gray-600 mt-1">
+                  Keep files in temp directory, auto-delete after 7 days
+                </div>
+              </div>
+            </label>
+            
+            <label className="flex items-start space-x-3 cursor-pointer p-4 border-2 rounded-lg transition-colors hover:bg-gray-50">
+              <input
+                type="radio"
+                name="retention"
+                value="delete"
+                checked={retentionPolicy === 'delete'}
+                onChange={(e) => setRetentionPolicy(e.target.value as any)}
+                className="mt-1"
+              />
+              <div>
+                <div className="font-medium flex items-center space-x-2">
+                  <span>🗑️</span>
+                  <span>Delete Immediately</span>
+                </div>
+                <div className="text-sm text-gray-600 mt-1">
+                  Remove all generated files after results are processed
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Start Docking Button */}
+      {canProceed && (
+        <div className="mt-8 flex justify-center">
+          <button
+            onClick={handleStartDocking}
+            disabled={!canProceed || isStarting}
+            className={`px-8 py-4 rounded-lg font-semibold text-lg transition-colors flex items-center space-x-3 ${
+              canProceed && !isStarting
+                ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            {isStarting ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <span>Starting Docking...</span>
+              </>
+            ) : (
+              <>
+                <span>⚡</span>
+                <span>Start Molecular Docking</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Settings Modal */}
       {showSettings && (

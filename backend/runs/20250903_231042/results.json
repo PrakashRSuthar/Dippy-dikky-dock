@@ -1,0 +1,35 @@
+{
+  "job_id": "a5e6b50a-bc7c-4c8a-8c79-b94b779fc102",
+  "status": "completed",
+  "run_dir": "D:\\Dippy-dikky-dock\\backend\\runs\\20250903_231042",
+  "best_affinity": -6.8,
+  "total_poses": 9,
+  "pocket_method": "template_based",
+  "pocket_center": [
+    4.910682926829267,
+    -1.3559512195121948,
+    -1.6
+  ],
+  "pocket_size": [
+    20,
+    20,
+    20
+  ],
+  "confidence": "high",
+  "docked_file": "runs\\20250903_231042\\docking\\1hsg_20250903_231043_20250903_231043_calotropin_docked.pdbqt",
+  "results_csv": "runs\\20250903_231042\\docking\\binding_scores.csv",
+  "cleaning_policy": {
+    "keep_waters": false,
+    "keep_ions": true,
+    "keep_solvents": false,
+    "keep_cofactors": true
+  },
+  "protein_analysis": "Found: 127 waters, 0 ions, 0 solvents, 0 cofactors",
+  "files": {
+    "raw_protein": "runs\\20250903_231042\\raw\\1hsg_20250903_231043.pdb",
+    "prepared_protein": "data\\prepared_proteins\\1hsg_20250903_231043_20250903_231043_prepared.pdbqt",
+    "prepared_ligand": "runs\\20250903_231042\\prepared\\calotropin.pdbqt",
+    "docked_poses": "runs\\20250903_231042\\docking\\1hsg_20250903_231043_20250903_231043_calotropin_docked.pdbqt",
+    "results_csv": "runs\\20250903_231042\\docking\\binding_scores.csv"
+  }
+}
