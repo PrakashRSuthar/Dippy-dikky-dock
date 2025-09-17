@@ -1,0 +1,123 @@
+{
+  "job_id": "073fd4db-545c-477e-96a3-f58e1771df94",
+  "status": "completed",
+  "run_dir": "C:\\Users\\nitij\\Documents\\GitHub\\Dippy-dikky-dock\\backend\\temp_runs\\20250917_102645_073fd4db\\run",
+  "best_affinity": -4.5,
+  "total_poses": 9,
+  "pocket_method": "template_based",
+  "pocket_center": [
+    1.7835714285714284,
+    -2.1942857142857144,
+    -1.6
+  ],
+  "pocket_size": [
+    20,
+    20,
+    20
+  ],
+  "confidence": "high",
+  "docked_file": "temp_runs\\20250917_102645_073fd4db\\run\\docking\\1hsg_20250917_102647_20250917_102645_aspirin_docked.pdbqt",
+  "results_csv": "temp_runs\\20250917_102645_073fd4db\\run\\docking\\binding_scores.csv",
+  "cleaning_policy": {
+    "keep_waters": false,
+    "keep_ions": true,
+    "keep_solvents": false,
+    "keep_cofactors": true
+  },
+  "protein_analysis": "Found: 127 waters, 0 ions, 0 solvents, 0 cofactors",
+  "all_pockets": [
+    {
+      "center": [
+        1.7835714285714284,
+        -2.1942857142857144,
+        -1.6
+      ],
+      "size": [
+        20,
+        20,
+        20
+      ],
+      "confidence": "high",
+      "method": "template_based"
+    },
+    {
+      "center": [
+        1.7835714285714284,
+        -2.1942857142857144,
+        -1.6
+      ],
+      "size": [
+        20,
+        20,
+        20
+      ],
+      "confidence": "high",
+      "method": "template_based"
+    },
+    {
+      "center": [
+        3.2835714285714284,
+        -1.1942857142857144,
+        -0.8
+      ],
+      "size": [
+        18,
+        22,
+        18
+      ],
+      "confidence": "high",
+      "method": "template_based"
+    },
+    {
+      "center": [
+        4.783571428571428,
+        -0.19428571428571442,
+        0.0
+      ],
+      "size": [
+        22,
+        18,
+        20
+      ],
+      "confidence": "medium",
+      "method": "template_based"
+    },
+    {
+      "center": [
+        6.283571428571428,
+        0.8057142857142856,
+        0.8
+      ],
+      "size": [
+        16,
+        20,
+        24
+      ],
+      "confidence": "medium",
+      "method": "template_based"
+    },
+    {
+      "center": [
+        7.783571428571428,
+        1.8057142857142856,
+        1.6
+      ],
+      "size": [
+        24,
+        16,
+        18
+      ],
+      "confidence": "medium",
+      "method": "template_based"
+    }
+  ],
+  "files": {
+    "raw_protein": "temp_runs\\20250917_102645_073fd4db\\run\\raw\\1hsg_20250917_102647.pdb",
+    "prepared_protein": "temp_runs\\20250917_102645_073fd4db\\run\\prepared\\1hsg_20250917_102647_20250917_102645_prepared.pdbqt",
+    "prepared_ligand": "temp_runs\\20250917_102645_073fd4db\\run\\prepared\\aspirin.pdbqt",
+    "docked_poses": "temp_runs\\20250917_102645_073fd4db\\run\\docking\\1hsg_20250917_102647_20250917_102645_aspirin_docked.pdbqt",
+    "results_csv": "temp_runs\\20250917_102645_073fd4db\\run\\docking\\binding_scores.csv"
+  },
+  "retention": "keep7d",
+  "workspace": "temp_runs\\20250917_102645_073fd4db"
+}

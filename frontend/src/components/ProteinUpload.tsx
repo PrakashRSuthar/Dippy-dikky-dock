@@ -126,9 +126,9 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
   const isValidLigandId = ligandId.trim().length >= 2;
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    <div className="max-w-full mx-auto p-4 lg:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
             <Activity className="w-6 h-6 text-white" />
@@ -170,10 +170,12 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Column: Protein Upload & Visualization */}
+      {/* Main Content - Full Width Layout */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        
+        {/* Left Column: Protein Section */}
         <div className="space-y-6">
-          {/* Protein Upload */}
+          {/* Protein Upload - More Compact */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-6 py-4 border-b">
               <h2 className="text-lg font-semibold flex items-center space-x-2">
@@ -207,9 +209,9 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
               </button>
             </div>
 
-            <div className="p-6">
+            <div className="p-4">
               {activeProteinTab === 'database' && (
-                <div>
+                <div className="space-y-3">
                   <input
                     type="text"
                     value={proteinId}
@@ -217,13 +219,11 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
                     placeholder="1HSG or P12345"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-center font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <div className="text-xs text-gray-500 mt-2 text-center">
-                    PDB ID or UniProt ID
-                  </div>
+                  <div className="text-xs text-gray-500 text-center">PDB ID or UniProt ID</div>
                   <button
                     onClick={handleProteinDatabase}
                     disabled={!isValidProteinId}
-                    className={`w-full mt-4 py-2 px-4 rounded-md font-medium transition-colors ${
+                    className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
                       isValidProteinId
                         ? 'bg-blue-600 text-white hover:bg-blue-700'
                         : 'bg-gray-300 text-gray-500 cursor-not-allowed'
@@ -235,35 +235,37 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
               )}
 
               {activeProteinTab === 'upload' && (
-                <div
-                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
-                    isHealthy 
-                      ? 'border-gray-300 hover:border-gray-400' 
-                      : 'border-gray-200 bg-gray-50'
-                  }`}
-                  onDrop={handleProteinDrop}
-                  onDragOver={(e) => e.preventDefault()}
-                >
-                  <Upload className={`w-8 h-8 mx-auto mb-2 ${isHealthy ? 'text-gray-400' : 'text-gray-300'}`} />
-                  <p className="text-sm text-gray-600 mb-2">Drop PDB/PDBQT files here</p>
-                  <input
-                    type="file"
-                    accept=".pdb,.pdbqt"
-                    onChange={handleProteinFileSelect}
-                    className="hidden"
-                    id="protein-file"
-                    disabled={!isHealthy}
-                  />
-                  <label
-                    htmlFor="protein-file"
-                    className={`inline-flex items-center px-3 py-1 border border-gray-300 rounded-md bg-white text-sm ${
-                      isHealthy ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-50'
+                <div>
+                  <div
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                      isHealthy 
+                        ? 'border-gray-300 hover:border-gray-400' 
+                        : 'border-gray-200 bg-gray-50'
                     }`}
+                    onDrop={handleProteinDrop}
+                    onDragOver={(e) => e.preventDefault()}
                   >
-                    Browse Files
-                  </label>
-                  {isUploading && <div className="mt-2 text-xs text-blue-600">Uploading...</div>}
-                  {!isHealthy && <div className="mt-2 text-xs text-red-600">Backend required for uploads</div>}
+                    <Upload className={`w-6 h-6 mx-auto mb-2 ${isHealthy ? 'text-gray-400' : 'text-gray-300'}`} />
+                    <p className="text-sm text-gray-600 mb-2">Drop PDB/PDBQT files here</p>
+                    <input
+                      type="file"
+                      accept=".pdb,.pdbqt"
+                      onChange={handleProteinFileSelect}
+                      className="hidden"
+                      id="protein-file"
+                      disabled={!isHealthy}
+                    />
+                    <label
+                      htmlFor="protein-file"
+                      className={`inline-flex items-center px-3 py-1 border border-gray-300 rounded-md bg-white text-sm ${
+                        isHealthy ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-50'
+                      }`}
+                    >
+                      Browse Files
+                    </label>
+                    {isUploading && <div className="mt-2 text-xs text-blue-600">Uploading...</div>}
+                    {!isHealthy && <div className="mt-2 text-xs text-red-600">Backend required for uploads</div>}
+                  </div>
                 </div>
               )}
 
@@ -278,29 +280,50 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
             </div>
           </div>
 
-          {/* Protein Visualization */}
+          {/* Protein Visualization - EXPANDED */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-6 py-4 border-b">
               <h3 className="text-lg font-semibold flex items-center space-x-2">
                 <span>🔬</span>
                 <span>Protein Preview</span>
               </h3>
+              <p className="text-sm text-gray-600">3D structure visualization</p>
             </div>
-            <div className="p-6">
-              <div className="h-64 border border-gray-200 rounded-lg bg-gray-50">
+            <div className="p-4">
+              {/* EXPANDED HEIGHT - Better fit for protein structures */}
+              <div className="h-96 md:h-[500px] lg:h-[600px] border border-gray-200 rounded-lg bg-gray-50">
                 <MoleculeVisualization 
                   moleculePath={proteinInput}
                   moleculeType="protein"
                   color="#3b82f6"
+                  height="100%"
                 />
               </div>
+              
+              {/* Protein Info Panel */}
+              {proteinInput && (
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                  <div className="bg-blue-50 p-3 rounded-lg">
+                    <div className="font-medium text-blue-800">Source</div>
+                    <div className="text-blue-700">
+                      {proteinSource === 'database' ? 'RCSB PDB Database' : 'Uploaded File'}
+                    </div>
+                  </div>
+                  <div className="bg-blue-50 p-3 rounded-lg">
+                    <div className="font-medium text-blue-800">Structure ID</div>
+                    <div className="text-blue-700 font-mono">
+                      {proteinSource === 'upload' ? uploadedFileName : proteinInput}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Right Column: Ligand Upload & Visualization */}
+        {/* Right Column: Ligand Section */}
         <div className="space-y-6">
-          {/* Ligand Upload */}
+          {/* Ligand Upload - More Compact */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-6 py-4 border-b">
               <h2 className="text-lg font-semibold flex items-center space-x-2">
@@ -334,9 +357,9 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
               </button>
             </div>
 
-            <div className="p-6">
+            <div className="p-4">
               {activeLigandTab === 'database' && (
-                <div>
+                <div className="space-y-3">
                   <input
                     type="text"
                     value={ligandId}
@@ -344,13 +367,11 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
                     placeholder="aspirin or 2244"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-center font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
                   />
-                  <div className="text-xs text-gray-500 mt-2 text-center">
-                    Compound name or CID
-                  </div>
+                  <div className="text-xs text-gray-500 text-center">Compound name or CID</div>
                   <button
                     onClick={handleLigandDatabase}
                     disabled={!isValidLigandId}
-                    className={`w-full mt-4 py-2 px-4 rounded-md font-medium transition-colors ${
+                    className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
                       isValidLigandId
                         ? 'bg-green-600 text-white hover:bg-green-700'
                         : 'bg-gray-300 text-gray-500 cursor-not-allowed'
@@ -362,34 +383,36 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
               )}
 
               {activeLigandTab === 'upload' && (
-                <div
-                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
-                    isHealthy 
-                      ? 'border-gray-300 hover:border-gray-400' 
-                      : 'border-gray-200 bg-gray-50'
-                  }`}
-                  onDrop={handleLigandDrop}
-                  onDragOver={(e) => e.preventDefault()}
-                >
-                  <Atom className={`w-8 h-8 mx-auto mb-2 ${isHealthy ? 'text-gray-400' : 'text-gray-300'}`} />
-                  <p className="text-sm text-gray-600 mb-2">Drop SDF/MOL/MOL2 files here</p>
-                  <input
-                    type="file"
-                    accept=".sdf,.mol,.mol2"
-                    onChange={handleLigandFileSelect}
-                    className="hidden"
-                    id="ligand-file"
-                    disabled={!isHealthy}
-                  />
-                  <label
-                    htmlFor="ligand-file"
-                    className={`inline-flex items-center px-3 py-1 border border-gray-300 rounded-md bg-white text-sm ${
-                      isHealthy ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-50'
+                <div>
+                  <div
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                      isHealthy 
+                        ? 'border-gray-300 hover:border-gray-400' 
+                        : 'border-gray-200 bg-gray-50'
                     }`}
+                    onDrop={handleLigandDrop}
+                    onDragOver={(e) => e.preventDefault()}
                   >
-                    Browse Files
-                  </label>
-                  {!isHealthy && <div className="mt-2 text-xs text-red-600">Backend required for uploads</div>}
+                    <Atom className={`w-6 h-6 mx-auto mb-2 ${isHealthy ? 'text-gray-400' : 'text-gray-300'}`} />
+                    <p className="text-sm text-gray-600 mb-2">Drop SDF/MOL/MOL2 files here</p>
+                    <input
+                      type="file"
+                      accept=".sdf,.mol,.mol2"
+                      onChange={handleLigandFileSelect}
+                      className="hidden"
+                      id="ligand-file"
+                      disabled={!isHealthy}
+                    />
+                    <label
+                      htmlFor="ligand-file"
+                      className={`inline-flex items-center px-3 py-1 border border-gray-300 rounded-md bg-white text-sm ${
+                        isHealthy ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-50'
+                      }`}
+                    >
+                      Browse Files
+                    </label>
+                    {!isHealthy && <div className="mt-2 text-xs text-red-600">Backend required for uploads</div>}
+                  </div>
                 </div>
               )}
 
@@ -404,22 +427,43 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
             </div>
           </div>
 
-          {/* Ligand Visualization */}
+          {/* Ligand Visualization - EXPANDED */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-6 py-4 border-b">
               <h3 className="text-lg font-semibold flex items-center space-x-2">
                 <span>⚗️</span>
                 <span>Ligand Preview</span>
               </h3>
+              <p className="text-sm text-gray-600">Chemical structure visualization</p>
             </div>
-            <div className="p-6">
-              <div className="h-64 border border-gray-200 rounded-lg bg-gray-50">
+            <div className="p-4">
+              {/* EXPANDED HEIGHT - Better fit for ligand structures */}
+              <div className="h-96 md:h-[500px] lg:h-[600px] border border-gray-200 rounded-lg bg-gray-50">
                 <MoleculeVisualization 
                   moleculePath={ligandInput}
                   moleculeType="ligand"
                   color="#10b981"
+                  height="100%"
                 />
               </div>
+
+              {/* Ligand Info Panel */}
+              {ligandInput && (
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                  <div className="bg-green-50 p-3 rounded-lg">
+                    <div className="font-medium text-green-800">Source</div>
+                    <div className="text-green-700">
+                      {ligandSource === 'database' ? 'PubChem Database' : 'Uploaded File'}
+                    </div>
+                  </div>
+                  <div className="bg-green-50 p-3 rounded-lg">
+                    <div className="font-medium text-green-800">Compound</div>
+                    <div className="text-green-700 font-mono">
+                      {ligandSource === 'upload' ? uploadedFileName : ligandInput}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
