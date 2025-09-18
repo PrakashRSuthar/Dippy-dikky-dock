@@ -1,3 +1,4 @@
+// src/components/MoleculeVisualization.tsx
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 
 // Safe 3Dmol types
@@ -7,51 +8,64 @@ declare global {
       createViewer: (element: HTMLElement, config?: Record<string, unknown>) => {
         setBackgroundColor: (color: string) => void;
         clear: () => void;
-        addModel: (data: string, format: string) => unknown;
+        addModel: (data: string, format: string) => any;
         setStyle: (selector: Record<string, unknown>, style: Record<string, unknown>) => void;
         addSphere: (sphere: { center: { x: number; y: number; z: number }; radius: number; color: string; alpha?: number }) => void;
         addBox: (box: { center: { x: number; y: number; z: number }; dimensions: { w: number; h: number; d: number }; color?: string; alpha?: number; wireframe?: boolean }) => void;
         zoomTo: (selector?: Record<string, unknown>, animationDuration?: number, fixedPath?: boolean) => void;
         render: () => void;
         resize: () => void;
-        setStyle: (selector: Record<string, unknown>, style: Record<string, unknown>) => void;
         spin: (enable: boolean) => void;
         zoom: (factor: number, animationDuration?: number) => void;
+        slab?: (val: number) => void;
+        setSlab?: (near: number, far: number) => void;
       } | null;
       rasmolElementColors: Record<string, string>;
     };
   }
 }
 
+interface PoseRow {
+  pose: number;
+  affinity: string;
+  rmsd_lb: string;
+  rmsd_ub: string;
+}
+
+interface Pocket {
+  center: number[];
+  size: number[];
+  confidence: string;
+  method: string;
+}
+
 interface MoleculeVisualizationProps {
+  // Generic path (non-results mode)
   moleculePath?: string | null;
+
+  // Results mode: pass both files
+  proteinPath?: string | null;     // prepared protein PDB/PDBQT
+  dockedPath?: string | null;      // docked poses PDBQT
+
   moleculeType?: 'protein' | 'ligand' | 'complex';
   color?: string;
   height?: string;
-  // Docking-specific props
-  pocketInfo?: {
-    center: number[];
-    size: number[];
-    confidence: string;
-    method: string;
-  };
-  allPockets?: Array<{
-    center: number[];
-    size: number[];
-    confidence: string;
-    method: string;
-  }>;
+
+  pocketInfo?: Pocket;
+  allPockets?: Pocket[];
+
   selectedPose?: number;
   showPockets?: boolean;
   jobId?: string;
   isResultsMode?: boolean;
-  // NEW: Pose data for multi-conformer files
-  poseData?: Array<{ pose: number; affinity: string; rmsd_lb: string; rmsd_ub: string }>;
+  poseData?: PoseRow[];
 }
 
-export const MoleculeVisualization: React.FC<MoleculeVisualizationProps> = ({ 
-  moleculePath, 
-  moleculeType = 'protein', 
+export const MoleculeVisualization: React.FC<MoleculeVisualizationProps> = ({
+  moleculePath,
+  proteinPath,
+  dockedPath,
+  moleculeType = 'protein',
   color = '#6b7280',
   height = '400px',
   pocketInfo,
@@ -62,610 +76,396 @@ export const MoleculeVisualization: React.FC<MoleculeVisualizationProps> = ({
   isResultsMode = false,
   poseData
 }) => {
-  const viewerRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const viewerInstanceRef = useRef<any>(null);
+  const currentFormatRef = useRef<string>('pdb');
+
   const [isLoading, setIsLoading] = useState(false);
   const [hasViewer, setHasViewer] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dataSource, setDataSource] = useState<string>('');
-  const [currentData, setCurrentData] = useState<string>('');
+  const [dataSource, setDataSource] = useState('');
+  const [currentData, setCurrentData] = useState('');
   const [pocketsVisible, setPocketsVisible] = useState(showPockets);
 
-  // Docking result file fetcher
-  const fetchDockingResultFile = async (filePath: string): Promise<{data: string, format: string, source: string}> => {
-    try {
-      if (filePath.startsWith('/') || filePath.includes('temp_runs') || filePath.includes('data/results') || filePath.includes('docking')) {
-        const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
-        const downloadUrl = `${apiBase}/api/download?path=${encodeURIComponent(filePath)}`;
-        
-        const response = await fetch(downloadUrl);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch docking result: ${response.status}`);
-        }
-        
-        const data = await response.text();
-        
-        let format = 'pdb';
-        if (filePath.endsWith('.pdbqt')) {
-          format = 'pdbqt';
-        } else if (filePath.endsWith('.sdf')) {
-          format = 'sdf';
-        }
-        
-        return { data, format, source: 'Docking Results' };
-      }
-      
-      throw new Error('Invalid docking result file path');
-    } catch (err) {
-      console.error('Docking file fetch failed:', err);
-      throw err;
-    }
-  };
+  const apiBase = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
-  // Structure resolution
-  const resolveStructureData = async (input: string): Promise<{data: string, format: string, source: string}> => {
-    if (!input || input.trim() === '') {
-      throw new Error('Empty input provided');
-    }
+  const isServerFilePath = (p: string) => {
+    if (!p) return false;
+    const s = p.trim();
+    return s.startsWith('/api/download')
+      || s.includes('temp_runs')
+      || s.includes('data/results')
+      || s.includes('docking')
+      || s.includes('uploads')
+      || s.includes('prepared')
+      || s.includes('data/proteins')
+      || s.includes('data/ligands');
+  }; // [file:1]
+
+  const buildDownloadUrl = (p: string) => {
+    const s = p.trim();
+    if (s.startsWith('/api/download')) return `${apiBase}${s}`;
+    return `${apiBase}/api/download?path=${encodeURIComponent(s)}`;
+  }; // [file:1]
+
+  const sniffFormat = (filePath: string, text: string): string => {
+    const ext = (filePath.split('.').pop() || '').toLowerCase();
+    if (ext === 'pdb') return 'pdb';
+    if (ext === 'pdbqt') return 'pdbqt';
+    if (ext === 'sdf') return 'sdf';
+    if (ext === 'mol2') return 'mol2';
+    const t = text || '';
+    if (t.includes('@<TRIPOS>MOLECULE')) return 'mol2';
+    if (t.includes('M  END')) return 'sdf';
+    if (t.includes('REMARK') && t.includes('VINA')) return 'pdbqt';
+    if (t.includes('ATOM') || t.includes('HETATM')) return 'pdb';
+    return 'pdb';
+  }; // [file:1]
+
+  const fetchServerFile = async (filePath: string): Promise<{ data: string; format: string; source: string }> => {
+    const url = buildDownloadUrl(filePath);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Download failed ${res.status}`);
+    const text = await res.text();
+    const format = sniffFormat(filePath, text);
+    return { data: text, format, source: 'Server File' };
+  }; // [file:1]
+
+  const resolveStructureData = async (input: string): Promise<{ data: string; format: string; source: string }> => {
+    if (!input || input.trim() === '') throw new Error('Empty input provided');
 
     const trimmedInput = input.trim();
-    
-    // Docking result file path
-    if (isResultsMode && (trimmedInput.includes('temp_runs') || trimmedInput.includes('data/results') || trimmedInput.includes('docking'))) {
-      return await fetchDockingResultFile(trimmedInput);
+
+    // Always route server-side files through API
+    if (isServerFilePath(trimmedInput)) {
+      const r = await fetchServerFile(trimmedInput);
+      return { ...r, source: isResultsMode ? 'Docking Results' : r.source };
     }
 
-    // Regular file path
-    if (trimmedInput.includes('/') || trimmedInput.includes('\\')) {
-      try {
-        const response = await fetch(trimmedInput);
-        if (!response.ok) throw new Error(`File fetch failed: ${response.status}`);
-        const data = await response.text();
-        
-        if (data.includes('ATOM') || data.includes('HETATM')) {
-          return { data, format: 'pdb', source: 'Uploaded File' };
-        }
-        throw new Error('Invalid file format');
-      } catch (err) {
-        console.warn('File fetch failed:', err);
-      }
+    // If looks like URL, fetch directly
+    if (/^https?:\/\//i.test(trimmedInput)) {
+      const res = await fetch(trimmedInput);
+      if (!res.ok) throw new Error(`URL fetch failed: ${res.status}`);
+      const text = await res.text();
+      const format = sniffFormat(trimmedInput, text);
+      return { data: text, format, source: 'URL' };
     }
 
-    // Raw PDB data
+    // Raw PDB text
     if (trimmedInput.includes('ATOM') || trimmedInput.includes('HETATM')) {
       return { data: trimmedInput, format: 'pdb', source: 'Direct PDB Data' };
     }
 
     // PDB ID
     if (/^[1-9][A-Za-z0-9]{3}$/i.test(trimmedInput)) {
-      try {
-        console.log(`🧬 Fetching PDB ID: ${trimmedInput}`);
-        const pdbUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://files.rcsb.org/download/${trimmedInput.toUpperCase()}.pdb`)}`;
-        const response = await fetch(pdbUrl);
-        
-        if (response.ok) {
-          const data = await response.text();
-          if (data.includes('ATOM') || data.includes('HETATM')) {
-            return { data, format: 'pdb', source: 'RCSB PDB Database' };
-          }
-        }
-      } catch (err) {
-        console.warn('PDB fetch failed:', err);
-      }
-    }
-
-    // PubChem
-    try {
-      console.log(`💊 Fetching from PubChem: ${trimmedInput}`);
-      const isNumeric = /^[0-9]+$/.test(trimmedInput);
-      const searchType = isNumeric ? 'cid' : 'name';
-      
-      const pubchemUrl = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${searchType}/${encodeURIComponent(trimmedInput)}/SDF`;
-      const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(pubchemUrl)}`);
-      
+      const pdbUrl = `https://files.rcsb.org/download/${trimmedInput.toUpperCase()}.pdb`;
+      const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(pdbUrl)}`);
       if (response.ok) {
         const data = await response.text();
-        if (data.includes('M  END') && data.includes('V2000')) {
+        if (data.includes('ATOM') || data.includes('HETATM')) {
+          return { data, format: 'pdb', source: 'RCSB PDB Database' };
+        }
+      }
+      throw new Error('Failed to resolve PDB ID');
+    }
+
+    // PubChem name or CID -> SDF
+    {
+      const isNumeric = /^[0-9]+$/.test(trimmedInput);
+      const searchType = isNumeric ? 'cid' : 'name';
+      const pubchemUrl = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${searchType}/${encodeURIComponent(trimmedInput)}/SDF`;
+      const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(pubchemUrl)}`);
+      if (response.ok) {
+        const data = await response.text();
+        if (data.includes('M  END')) {
           return { data, format: 'sdf', source: 'PubChem Database' };
         }
       }
-    } catch (err) {
-      console.warn('PubChem fetch failed:', err);
     }
 
     throw new Error(`Could not resolve structure: "${trimmedInput}"`);
-  };
+  }; // [file:1]
 
-  // Extract specific pose from multi-model PDB/PDBQT
   const extractPoseFromData = (data: string, poseIndex: number): string => {
     if (!isResultsMode || poseIndex === 0) return data;
-    
-    // For PDBQT files with multiple models
-    if (data.includes('MODEL')) {
-      const models = data.split(/MODEL\s+\d+/);
-      if (models.length > poseIndex + 1) {
-        const selectedModel = models[poseIndex + 1];
-        const endIndex = selectedModel.indexOf('ENDMDL');
+    const fmt = currentFormatRef.current;
+    if ((fmt === 'pdb' || fmt === 'pdbqt') && data.includes('MODEL')) {
+      const chunks = data.split(/MODEL\s+\d+/);
+      if (chunks.length > poseIndex + 1) {
+        const selected = chunks[poseIndex + 1];
+        const endIndex = selected.indexOf('ENDMDL');
         if (endIndex !== -1) {
-          return `MODEL     ${poseIndex + 1}\n${selectedModel.substring(0, endIndex)}\nENDMDL\nEND`;
+          return `MODEL ${poseIndex + 1}\n${selected.substring(0, endIndex)}\nENDMDL\nEND`;
         }
       }
     }
-    
-    return data; // Return original if pose extraction fails
-  };
+    return data;
+  }; // [file:1]
 
-  // Add binding pockets visualization
   const addPocketVisualization = useCallback((viewer: any) => {
     if (!pocketsVisible || !viewer) return;
-
-    console.log('🎯 Adding pocket visualization...');
-
-    // Add primary pocket (red)
     if (pocketInfo) {
       const [x, y, z] = pocketInfo.center;
       const [sx, sy, sz] = pocketInfo.size;
-      
-      console.log(`Primary pocket: center(${x}, ${y}, ${z}), size(${sx}, ${sy}, ${sz})`);
-      
-      // Add wireframe box for binding pocket
       viewer.addBox({
         center: { x, y, z },
         dimensions: { w: sx, h: sy, d: sz },
-        color: 'red',
-        alpha: 0.4,
+        color: '#ef4444',
+        alpha: 0.25,
         wireframe: true
       });
-      
-      // Add center sphere
-      viewer.addSphere({
-        center: { x, y, z },
-        radius: 3.0,
-        color: 'red',
-        alpha: 0.8
-      });
+      viewer.addSphere({ center: { x, y, z }, radius: 2.5, color: '#ef4444', alpha: 0.7 });
     }
-
-    // Add other pockets
     if (allPockets && allPockets.length > 1) {
-      const colors = ['blue', 'green', 'orange', 'purple', 'yellow', 'cyan'];
-      
-      allPockets.slice(1).forEach((pocket, idx) => {
-        const [x, y, z] = pocket.center;
-        const [sx, sy, sz] = pocket.size;
-        const color = colors[idx % colors.length];
-        
+      const colors = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#eab308', '#06b6d4'];
+      allPockets.slice(1).forEach((p, idx) => {
+        const [x, y, z] = p.center;
+        const [sx, sy, sz] = p.size;
+        const c = colors[idx % colors.length];
         viewer.addBox({
           center: { x, y, z },
           dimensions: { w: sx, h: sy, d: sz },
-          color: color,
-          alpha: 0.3,
+          color: c,
+          alpha: 0.2,
           wireframe: true
         });
-        
-        viewer.addSphere({
-          center: { x, y, z },
-          radius: 2.0,
-          color: color,
-          alpha: 0.6
-        });
+        viewer.addSphere({ center: { x, y, z }, radius: 2.0, color: c, alpha: 0.5 });
       });
     }
-  }, [pocketInfo, allPockets, pocketsVisible]);
+  }, [pocketInfo, allPockets, pocketsVisible]); // [file:1]
 
-  // Main initialization effect
+  const load3DmolIfNeeded = async () => {
+    if (window.$3Dmol) return;
+    await new Promise<void>((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://3Dmol.csb.pitt.edu/build/3Dmol-min.js';
+      script.onload = () => setTimeout(() => window.$3Dmol ? resolve() : reject(new Error('3Dmol not available')), 150);
+      script.onerror = () => reject(new Error('Failed to load 3Dmol script'));
+      document.head.appendChild(script);
+    });
+  }; // [file:1]
+
+  const loadTextViaApi = async (path: string) => {
+    const url = path.startsWith('/api/download') ? `${apiBase}${path}` : `${apiBase}/api/download?path=${encodeURIComponent(path)}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`Fetch failed: ${r.status}`);
+    return await r.text();
+  }; // [file:1]
+
+  const loadResultsComplex = async (viewer: any) => {
+    if (!proteinPath || !dockedPath) throw new Error('Missing protein or docked file');
+    // Fetch both texts
+    const [protText, dockText] = await Promise.all([loadTextViaApi(proteinPath), loadTextViaApi(dockedPath)]);
+    const protFmt = sniffFormat(proteinPath, protText);
+    const dockFmt = 'pdbqt';
+    currentFormatRef.current = dockFmt;
+    setCurrentData(dockText);
+
+    const poseText = extractPoseFromData(dockText, selectedPose);
+
+    // Build scene
+    viewer.clear();
+    const protModel = viewer.addModel(protText, protFmt);
+    if (!protModel) throw new Error('Protein model failed to load');
+
+    // Protein style: cartoon
+    viewer.setStyle({}, { cartoon: { color: 'lightblue', opacity: 0.95 } });
+
+    const ligModel = viewer.addModel(poseText, dockFmt);
+    if (!ligModel) throw new Error('Ligand model failed to load');
+
+    // Ligand style: ball-and-stick
+    viewer.setStyle({ model: ligModel }, {
+      stick: { radius: 0.65, colorscheme: 'Jmol' },
+      sphere: { radius: 0.7, colorscheme: 'Jmol', opacity: 0.9 }
+    });
+
+    // Highlight pocket region and nearby residues
+    if (pocketInfo) {
+      const [x, y, z] = pocketInfo.center;
+      const [sx, sy, sz] = pocketInfo.size;
+      viewer.setStyle({
+        and: [
+          { atom: 'CA' },
+          { x: { $gte: x - sx/2, $lte: x + sx/2 } },
+          { y: { $gte: y - sy/2, $lte: y + sy/2 } },
+          { z: { $gte: z - sz/2, $lte: z + sz/2 } }
+        ]
+      }, { cartoon: { color: 'orange', opacity: 1.0 } });
+    }
+
+    if (pocketsVisible) addPocketVisualization(viewer);
+
+    // Camera framing similar to CB-Dock2
+    viewer.setBackgroundColor('#ffffff');
+    if (pocketInfo) {
+      const [x, y, z] = pocketInfo.center;
+      const [sx, sy, sz] = pocketInfo.size;
+      viewer.zoomTo({
+        and: [
+          { x: { $gte: x - sx, $lte: x + sx } },
+          { y: { $gte: y - sy, $lte: y + sy } },
+          { z: { $gte: z - sz, $lte: z + sz } }
+        ]
+      }, 650);
+    } else {
+      viewer.zoomTo({}, 650);
+    }
+    // Clipping
+    viewer.setSlab && viewer.setSlab(5, 140);
+    viewer.zoom(0.92, 500);
+    viewer.render();
+
+    setHasViewer(true);
+    setDataSource('Docking Results (protein+ligand)');
+  }; // [file:1]
+
+  // Generic, non-results loader
+  const loadSingleStructure = async () => {
+    if (!moleculePath) return;
+    await load3DmolIfNeeded();
+    if (!viewerRef.current || !containerRef.current) throw new Error('Viewer elements not ready');
+
+    // Size
+    const rect = containerRef.current.getBoundingClientRect();
+    const w = Math.max(rect.width, 320);
+    const h = Math.max(rect.height, 320);
+    viewerRef.current.style.width = `${w}px`;
+    viewerRef.current.style.height = `${h}px`;
+
+    const viewer = window.$3Dmol!.createViewer(viewerRef.current!, { backgroundColor: 'white' });
+    viewerInstanceRef.current = viewer;
+    const { data, format, source } = await resolveStructureData(moleculePath);
+    currentFormatRef.current = format;
+    setDataSource(source);
+    setCurrentData(data);
+
+    viewer.clear();
+    const model = viewer.addModel(data, format);
+    if (!model) throw new Error('Failed to create model from data');
+
+    if (format === 'pdb' && moleculeType === 'protein') {
+      viewer.setStyle({}, { cartoon: { color: 'spectrum' } });
+    } else {
+      viewer.setStyle({}, { stick: { radius: 0.4, colorscheme: 'Jmol' }, sphere: { radius: 0.45, colorscheme: 'Jmol' } });
+    }
+
+    addPocketVisualization(viewer);
+
+    viewer.zoomTo();
+    viewer.zoom(1.1, 500);
+    viewer.render();
+    setHasViewer(true);
+  }; // [file:1]
+
+  // Initial load
   useEffect(() => {
-    if (!moleculePath || moleculePath.trim() === '') return;
-    
-    const initializeViewer = async () => {
+    const init = async () => {
+      if (!(moleculePath || (isResultsMode && proteinPath && dockedPath))) return;
       try {
         setIsLoading(true);
         setError(null);
-        setHasViewer(false);
-        setDataSource('');
+        await load3DmolIfNeeded();
 
-        // Load 3Dmol script
-        if (!window.$3Dmol) {
-          await new Promise<void>((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = 'https://3Dmol.csb.pitt.edu/build/3Dmol-min.js';
-            script.onload = () => {
-              setTimeout(() => {
-                if (window.$3Dmol) resolve();
-                else reject(new Error('3Dmol library not available'));
-              }, 200);
-            };
-            script.onerror = () => reject(new Error('Failed to load 3Dmol script'));
-            document.head.appendChild(script);
-          });
+        // Prepare container size early
+        if (viewerRef.current && containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          viewerRef.current.style.width = `${Math.max(rect.width, 320)}px`;
+          viewerRef.current.style.height = `${Math.max(rect.height, 320)}px`;
         }
 
-        // Set up viewer element
-        if (!viewerRef.current || !containerRef.current) {
-          throw new Error('Viewer elements not ready');
-        }
-
-        const containerRect = containerRef.current.getBoundingClientRect();
-        const minWidth = Math.max(containerRect.width, 300);
-        const minHeight = Math.max(containerRect.height, 300);
-
-        viewerRef.current.style.width = `${minWidth}px`;
-        viewerRef.current.style.height = `${minHeight}px`;
-        viewerRef.current.style.minWidth = '300px';
-        viewerRef.current.style.minHeight = '300px';
-
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        const viewer = window.$3Dmol!.createViewer(viewerRef.current, {
-          backgroundColor: 'white'
-        });
-
-        if (!viewer) {
-          throw new Error('Viewer creation returned null');
-        }
-
-        viewer.setBackgroundColor('white');
-        viewer.resize();
+        const viewer = window.$3Dmol!.createViewer(viewerRef.current!, { backgroundColor: 'white' });
         viewerInstanceRef.current = viewer;
 
-        console.log(`🔍 Resolving structure: "${moleculePath}" (Results mode: ${isResultsMode})`);
-        const { data, format, source } = await resolveStructureData(moleculePath);
-        setDataSource(source);
-        setCurrentData(data);
-
-        console.log(`✅ Successfully resolved from ${source}`);
-        
-        // Handle pose selection for docking results
-        const poseData = extractPoseFromData(data, selectedPose);
-        
-        // Clear and load model
-        viewer.clear();
-        const model = viewer.addModel(poseData, format);
-        if (!model) {
-          throw new Error('Failed to create model from data');
+        if (isResultsMode && proteinPath && dockedPath) {
+          await loadResultsComplex(viewer);
+        } else if (moleculePath) {
+          await loadSingleStructure();
         }
-
-        // Apply styling
-        if (moleculeType === 'complex' || isResultsMode) {
-          console.log('🔬 Styling docked complex');
-          
-          // Protein: cartoon (blue-ish)
-          viewer.setStyle({ chain: 'A' }, { 
-            cartoon: { 
-              color: 'lightblue', 
-              alpha: 0.8 
-            } 
-          });
-          
-          // Ligand: ball-and-stick (colorful)
-          viewer.setStyle({ hetflag: true }, { 
-            stick: { 
-              radius: 0.5, 
-              colorscheme: 'Jmol' 
-            },
-            sphere: { 
-              radius: 0.6, 
-              colorscheme: 'Jmol' 
-            }
-          });
-          
-          // Highlight binding site
-          if (pocketInfo) {
-            const [x, y, z] = pocketInfo.center;
-            const [sx, sy, sz] = pocketInfo.size;
-            
-            viewer.setStyle({
-              and: [
-                { atom: 'CA' },
-                { x: { $gte: x - sx/2, $lte: x + sx/2 }},
-                { y: { $gte: y - sy/2, $lte: y + sy/2 }},
-                { z: { $gte: z - sz/2, $lte: z + sz/2 }}
-              ]
-            }, {
-              cartoon: { color: 'orange', alpha: 0.9 }
-            });
-          }
-          
-        } else if (format === 'pdb' && (moleculeType === 'protein' || source.includes('PDB'))) {
-          viewer.setStyle({}, { cartoon: { color: 'spectrum' } });
-        } else {
-          viewer.setStyle({}, { 
-            stick: { radius: 0.4, colorscheme: 'Jmol' },
-            sphere: { radius: 0.4, colorscheme: 'Jmol' }
-          });
-        }
-
-        // Add pocket visualizations
-        addPocketVisualization(viewer);
-
-        // ENHANCED ZOOM AND RESIZE
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // First, zoom to all atoms
-        viewer.zoomTo();
-        
-        // Wait a bit, then apply additional zoom for better visibility
-        setTimeout(() => {
-          if (moleculeType === 'complex' || isResultsMode) {
-            // For docked complexes, zoom out a bit to see the full structure
-            viewer.zoom(0.8, 1000);
-          } else {
-            // For individual molecules, zoom in for detail
-            viewer.zoom(1.2, 1000);
-          }
-          viewer.render();
-        }, 500);
-        
-        viewer.render();
-        setHasViewer(true);
-        console.log(`🎉 Successfully rendered: ${moleculePath} (Pose ${selectedPose + 1})`);
-
-      } catch (err) {
-        console.error('❌ Viewer initialization failed:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load viewer');
+      } catch (e: any) {
+        console.error('Viewer initialization failed:', e);
+        setError(e?.message || 'Failed to load viewer');
         setHasViewer(false);
         setDataSource('');
       } finally {
         setIsLoading(false);
       }
     };
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moleculePath, proteinPath, dockedPath, moleculeType, isResultsMode]); // [file:1]
 
-    initializeViewer();
-  }, [moleculePath, moleculeType, isResultsMode, addPocketVisualization]);
-
-  // Handle pose changes
+  // Pose change in results mode
   useEffect(() => {
-    if (!viewerInstanceRef.current || !currentData || !isResultsMode) return;
-    
-    console.log(`🔄 Switching to pose ${selectedPose + 1}`);
-    
-    const viewer = viewerInstanceRef.current;
-    const poseData = extractPoseFromData(currentData, selectedPose);
-    
-    // Clear and reload with new pose
-    viewer.clear();
-    const model = viewer.addModel(poseData, 'pdbqt');
-    
-    if (model) {
-      // Reapply styling
-      viewer.setStyle({ chain: 'A' }, { 
-        cartoon: { color: 'lightblue', alpha: 0.8 } 
-      });
-      
-      viewer.setStyle({ hetflag: true }, { 
-        stick: { radius: 0.5, colorscheme: 'Jmol' },
-        sphere: { radius: 0.6, colorscheme: 'Jmol' }
-      });
-      
-      // Re-add pockets
-      addPocketVisualization(viewer);
-      
-      // Re-zoom and render
-      viewer.zoomTo();
-      setTimeout(() => {
-        viewer.zoom(0.8, 500);
-        viewer.render();
-      }, 200);
-    }
-  }, [selectedPose, currentData, isResultsMode, addPocketVisualization]);
-
-  // Handle pocket visibility toggle
-  useEffect(() => {
-    if (!viewerInstanceRef.current || !isResultsMode) return;
-    
-    const viewer = viewerInstanceRef.current;
-    
-    // Clear only shapes (pockets), keep molecules
-    viewer.clear();
-    
-    // Re-add the current model
-    const poseData = extractPoseFromData(currentData, selectedPose);
-    const model = viewer.addModel(poseData, 'pdbqt');
-    
-    if (model) {
-      // Reapply styling
-      viewer.setStyle({ chain: 'A' }, { 
-        cartoon: { color: 'lightblue', alpha: 0.8 } 
-      });
-      
-      viewer.setStyle({ hetflag: true }, { 
-        stick: { radius: 0.5, colorscheme: 'Jmol' },
-        sphere: { radius: 0.6, colorscheme: 'Jmol' }
-      });
-      
-      // Add pockets if visible
-      if (pocketsVisible) {
-        addPocketVisualization(viewer);
+    if (!viewerInstanceRef.current || !currentData || !isResultsMode || !dockedPath || !proteinPath) return;
+    const rerender = async () => {
+      try {
+        const viewer = viewerInstanceRef.current;
+        await loadResultsComplex(viewer);
+      } catch (e) {
+        console.warn('Pose switch failed', e);
       }
-      
-      viewer.render();
+    };
+    rerender();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPose, pocketsVisible]); // [file:1]
+
+  // Pocket toggle re-render (for non-results mode)
+  useEffect(() => {
+    if (!viewerInstanceRef.current || !currentData || isResultsMode) return;
+    try {
+      const viewer = viewerInstanceRef.current;
+      viewer.clear();
+      const model = viewer.addModel(currentData, currentFormatRef.current);
+      if (model) {
+        if (currentFormatRef.current === 'pdb' && moleculeType === 'protein') {
+          viewer.setStyle({}, { cartoon: { color: 'spectrum' } });
+        } else {
+          viewer.setStyle({}, { stick: { radius: 0.4, colorscheme: 'Jmol' }, sphere: { radius: 0.45, colorscheme: 'Jmol' } });
+        }
+        if (pocketsVisible) addPocketVisualization(viewer);
+        viewer.render();
+      }
+    } catch (e) {
+      console.warn('Pocket toggle re-render failed', e);
     }
-  }, [pocketsVisible, currentData, selectedPose, isResultsMode, addPocketVisualization]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pocketsVisible]); // [file:1]
 
-  // Toggle pocket visibility
-  const togglePockets = () => {
-    setPocketsVisible(!pocketsVisible);
-  };
+  const togglePockets = () => setPocketsVisible(!pocketsVisible); // [file:1]
 
-  // No molecule loaded state
-  if (!moleculePath || moleculePath.trim() === '') {
-    return (
-      <div className="w-full h-full flex items-center justify-center" style={{ height }}>
-        <div className="text-center text-gray-400">
-          <div className="text-6xl mb-6">
-            {moleculeType === 'protein' ? '🧬' : 
-             moleculeType === 'ligand' ? '💊' : 
-             moleculeType === 'complex' ? '🔬' : '⚗️'}
-          </div>
-          <p className="text-sm">No {moleculeType} loaded</p>
-        </div>
-      </div>
-    );
-  }
-
-  const isFilePath = moleculePath.includes('/') || moleculePath.includes('\\');
-  const displayName = isFilePath ? 
-    (isResultsMode ? 'Docking Results' : 'Uploaded File') : 
-    moleculePath;
+  const isFilePath = (moleculePath || proteinPath || dockedPath || '').includes('/') || (moleculePath || proteinPath || dockedPath || '').includes('\\'); // [file:1]
+  const displayName = isFilePath ? (isResultsMode ? 'Docking Results' : 'Uploaded File') : (moleculePath || ''); // [file:1]
 
   return (
-    <div 
-      ref={containerRef}
-      className="w-full h-full relative bg-gradient-to-br from-gray-900 to-gray-700 rounded-lg overflow-hidden" 
-      style={{ height, minHeight: '350px' }}
-    >
-      {/* 3D Viewer */}
-      <div
-        ref={viewerRef}
-        className="absolute inset-0"
-        style={{ 
-          width: '100%', 
-          height: '100%',
-          minWidth: '300px',
-          minHeight: '300px',
-          visibility: hasViewer && !isLoading && !error ? 'visible' : 'hidden'
-        }}
-      />
+    <div className="w-full">
+      <div ref={containerRef} className="w-full relative rounded border border-gray-200 bg-white" style={{ height }}>
+        <div ref={viewerRef} className="w-full h-full" />
 
-      {/* Placeholder/Error state */}
-      {(!hasViewer || isLoading || error) && (
-        <div className="absolute inset-0">
-          <div className="absolute inset-0 opacity-20">
-            <div className="absolute top-4 left-4 w-2 h-2 bg-white rounded-full animate-pulse"></div>
-            <div className="absolute top-8 right-8 w-1 h-1 bg-white rounded-full animate-pulse delay-300"></div>
-            <div className="absolute bottom-6 left-8 w-1 h-1 bg-white rounded-full animate-pulse delay-500"></div>
-            <div className="absolute bottom-4 right-4 w-2 h-2 bg-white rounded-full animate-pulse delay-700"></div>
-            
-            <svg className="w-full h-full opacity-10">
-              <defs>
-                <pattern id={`grid-${moleculeType}`} width="20" height="20" patternUnits="userSpaceOnUse">
-                  <path d="M 20 0 L 0 0 0 20" fill="none" stroke="white" strokeWidth="0.5"/>
-                </pattern>
-              </defs>
-              <rect width="100%" height="100%" fill={`url(#grid-${moleculeType})`} />
-            </svg>
+        {/* Compact top-left toolbar */}
+        {hasViewer && !isLoading && !error && (
+          <div className="absolute top-2 left-2 flex items-center gap-2">
+            <span className="px-2 py-1 text-xs bg-white/80 backdrop-blur rounded border border-gray-200 shadow-sm">
+              {isResultsMode ? `Pose ${selectedPose + 1}${poseData && poseData[selectedPose]?.affinity ? ` • ${poseData[selectedPose].affinity} kcal/mol` : ''}` : '3D'}
+            </span>
+            {(pocketInfo || (allPockets && allPockets.length > 0)) && (
+              <button className="px-2 py-1 text-xs bg-white/80 rounded border hover:bg-white" onClick={togglePockets}>
+                {pocketsVisible ? 'Hide Pockets' : 'Show Pockets'}
+              </button>
+            )}
+            <button className="px-2 py-1 text-xs bg-white/80 rounded border hover:bg-white" onClick={() => viewerInstanceRef.current?.spin?.(true)}>Rotate</button>
+            <button className="px-2 py-1 text-xs bg-white/80 rounded border hover:bg-white" onClick={() => { viewerInstanceRef.current?.zoomTo?.(); viewerInstanceRef.current?.render?.(); }}>Reset</button>
           </div>
+        )}
 
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center p-6">
-              <div className="relative mb-4">
-                <div 
-                  className="text-6xl transform transition-transform duration-1000 hover:scale-110" 
-                  style={{ color }}
-                >
-                  {moleculeType === 'protein' ? '🧬' : 
-                   moleculeType === 'ligand' ? '💊' : 
-                   moleculeType === 'complex' ? '🔬' : '⚗️'}
-                </div>
-                
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-16 h-16 border border-white opacity-30 rounded-full animate-spin"></div>
-                </div>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-20 h-20 border border-white opacity-20 rounded-full animate-ping"></div>
-                </div>
-              </div>
-
-              <div className="bg-black bg-opacity-50 rounded-lg p-4 backdrop-blur-sm">
-                <div className="text-lg font-semibold text-white mb-2">
-                  {displayName}
-                </div>
-                <div className="text-sm text-gray-300 mb-1 capitalize">
-                  {moleculeType === 'complex' ? 'Docked Complex' : `${moleculeType} Structure`}
-                  {selectedPose > 0 && ` - Pose ${selectedPose + 1}`}
-                </div>
-                <div className="text-xs text-gray-400 font-mono bg-gray-800 px-2 py-1 rounded max-w-full truncate">
-                  {error ? `Error: ${error}` : 
-                   isLoading ? `Loading ${isResultsMode ? 'docking results' : 'structure'}...` :
-                   dataSource ? `Source: ${dataSource}` :
-                   moleculePath}
-                </div>
-                
-                {isResultsMode && pocketInfo && (
-                  <div className="mt-2 text-xs text-gray-300">
-                    <div>Binding Site: ({pocketInfo.center.map(c => c.toFixed(1)).join(', ')})</div>
-                    <div>Method: {pocketInfo.method} • Confidence: {pocketInfo.confidence}</div>
-                  </div>
-                )}
-                
-                <div className="mt-4 flex justify-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${
-                    error ? 'bg-red-400' : 
-                    isLoading ? 'bg-yellow-400 animate-pulse' : 
-                    hasViewer ? 'bg-green-400' : 'bg-gray-400'
-                  }`}></div>
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse delay-200"></div>
-                  <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse delay-400"></div>
-                </div>
-                <div className="text-xs text-gray-400 mt-2">
-                  {error ? 'Visualization failed' : 
-                   isLoading ? 'Loading molecular data...' : 
-                   hasViewer ? (isResultsMode ? 'Docking complex rendered' : `Rendered from ${dataSource}`) : 'Initializing...'}
-                </div>
-              </div>
-
-              <div className="flex justify-center space-x-2 mt-4">
-                <button 
-                  className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded transition-colors"
-                  onClick={() => window.location.reload()}
-                >
-                  {error ? 'Retry' : 'Rotate'}
-                </button>
-                <button className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded transition-colors">
-                  Zoom
-                </button>
-                <button className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded transition-colors">
-                  Reset
-                </button>
-              </div>
-            </div>
+        {/* Minimal error/loading chip, bottom-left */}
+        {(isLoading || error || (!hasViewer && !isLoading)) && (
+          <div className="absolute bottom-2 left-2 px-2 py-1 text-xs bg-white/80 backdrop-blur rounded border border-gray-200 shadow-sm">
+            {error ? `Error: ${error}` : isLoading ? `Loading ${isResultsMode ? 'results' : 'structure'}...` : (dataSource || displayName)}
           </div>
-        </div>
-      )}
-
-      {/* Status indicator */}
-      <div className="absolute bottom-4 right-4 bg-black bg-opacity-70 rounded px-3 py-2">
-        <div className="flex items-center space-x-2">
-          <div className={`w-3 h-3 rounded-full ${
-            error ? 'bg-red-400' : 
-            isLoading ? 'bg-yellow-400 animate-pulse' : 
-            hasViewer ? 'bg-green-400' : 'bg-gray-400'
-          }`}></div>
-          <span className="text-xs text-white">
-            {error ? 'Error' : 
-             isLoading ? 'Loading' : 
-             hasViewer ? (isResultsMode ? 'Docked' : '3D Active') : 'Rendering'}
-          </span>
-        </div>
+        )}
       </div>
-
-      {/* Pocket toggle for results mode */}
-      {isResultsMode && hasViewer && (pocketInfo || allPockets) && (
-        <div className="absolute top-4 right-4 bg-black bg-opacity-70 rounded px-3 py-2">
-          <div className="flex items-center space-x-2">
-            <span className="text-xs text-white">Pockets:</span>
-            <button
-              onClick={togglePockets}
-              className={`text-xs px-2 py-1 rounded transition-colors ${
-                pocketsVisible ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-gray-500 text-white hover:bg-gray-600'
-              }`}
-            >
-              {pocketsVisible ? 'Hide' : 'Show'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Pose info overlay */}
-      {isResultsMode && hasViewer && poseData && poseData[selectedPose] && (
-        <div className="absolute top-4 left-4 bg-black bg-opacity-70 rounded px-3 py-2">
-          <div className="text-xs text-white">
-            <div>Pose {selectedPose + 1}/{poseData.length}</div>
-            <div>Affinity: {poseData[selectedPose].affinity} kcal/mol</div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
