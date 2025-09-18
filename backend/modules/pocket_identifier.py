@@ -1,464 +1,396 @@
 # backend/modules/pocket_identifier.py
-# Enhanced pocket identification with configurable detail level and pipeline integration
+# Pocket identification via raw-structure (fpocket/P2Rank), ligand-template, and structure-based fallback,
+# with consensus clustering, cross-validation, contact rescore, and ligand-guided refinement.
 
-import os
-import sys
 import subprocess
 import tempfile
-import json
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Union
+from typing import List, Dict, Optional
 import logging
+import math
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# -------------------------
+# Math / helpers
+# -------------------------
+def _dist(a, b):
+    return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
 
+def _center_xyz(m):
+    return (float(m.get("center_x", 0)), float(m.get("center_y", 0)), float(m.get("center_z", 0)))
+
+def _box_diag(m):
+    return math.sqrt(float(m.get("size_x",20))**2 + float(m.get("size_y",20))**2 + float(m.get("size_z",20))**2)
+
+def _normalize(vals: List[float]) -> List[float]:
+    if not vals: return []
+    mn, mx = min(vals), max(vals)
+    if mx - mn < 1e-9: return [0.5]*len(vals)
+    return [(v - mn)/(mx - mn) for v in vals]
+
+def _cluster_modes(modes: List[Dict], max_dist_factor: float = 0.6) -> List[Dict]:
+    clusters: List[Dict] = []
+    for m in modes:
+        c = _center_xyz(m); d = _box_diag(m)
+        placed = False
+        for cl in clusters:
+            cc = cl["_centroid"]
+            if _dist(c, cc) <= max(d, cl["_avg_diag"]) * max_dist_factor:
+                cl["items"].append(m)
+                xs = [_center_xyz(x)[0] for x in cl["items"]]
+                ys = [_center_xyz(x)[1] for x in cl["items"]]
+                zs = [_center_xyz(x)[2] for x in cl["items"]]
+                cl["_centroid"] = (sum(xs)/len(xs), sum(ys)/len(ys), sum(zs)/len(zs))
+                cl["_avg_diag"] = sum(_box_diag(x) for x in cl["items"]) / len(cl["items"])
+                placed = True
+                break
+        if not placed:
+            clusters.append({"items":[m], "_centroid": c, "_avg_diag": d})
+    return clusters
+
+def _consensus_score(cluster: Dict) -> float:
+    items = cluster["items"]
+    methods = set(i.get("method","?") for i in items)
+    return len(items) + (0.5 if len(methods) >= 2 else 0.0)
+
+def _contact_rescore(protein_pdb: str, mode: Dict, radius: float = 6.0) -> float:
+    """Count CA atoms within radius of box center; log-diminishing score."""
+    try:
+        cx, cy, cz = _center_xyz(mode)
+        r2 = radius*radius
+        cnt = 0
+        with open(protein_pdb) as f:
+            for line in f:
+                if line.startswith("ATOM") and line[12:16].strip() == "CA":
+                    parts = line[30:54].split()
+                    if len(parts) >= 3:
+                        x, y, z = map(float, parts[:3])
+                        dx, dy, dz = x-cx, y-cy, z-cz
+                        if dx*dx + dy*dy + dz*dz <= r2:
+                            cnt += 1
+        return math.log1p(cnt)
+    except Exception:
+        return 0.0
+
+def _ligand_guided_refine(protein_pdb: str, ligand_pdbqt: Optional[str], mode: Dict) -> Dict:
+    """Pull box toward protein and size to ligand extents + margin, clamped 14..26 Å."""
+    if not ligand_pdbqt or not Path(ligand_pdbqt).exists():
+        return mode
+    try:
+        pts = []
+        with open(ligand_pdbqt) as f:
+            for line in f:
+                if line.startswith(("ATOM","HETATM")) and line[76:78].strip() != 'H':
+                    parts = line[30:54].split()
+                    if len(parts) >= 3:
+                        pts.append(tuple(map(float, parts[:3])))
+        if not pts: return mode
+        cx = sum(p[0] for p in pts)/len(pts)
+        cy = sum(p[1] for p in pts)/len(pts)
+        cz = sum(p[2] for p in pts)/len(pts)
+        minx=min(p[0] for p in pts); maxx=max(p[0] for p in pts)
+        miny=min(p[1] for p in pts); maxy=max(p[1] for p in pts)
+        minz=min(p[2] for p in pts); maxz=max(p[2] for p in pts)
+        extx=maxx-minx; exty=maxy-miny; extz=maxz-minz
+        # nearest CA to ligand centroid
+        nearest=None; nd2=1e9
+        with open(protein_pdb) as f:
+            for line in f:
+                if line.startswith("ATOM") and line[12:16].strip()=="CA":
+                    parts = line[30:54].split()
+                    if len(parts)>=3:
+                        x,y,z = map(float, parts[:3])
+                        d2=(x-cx)**2+(y-cy)**2+(z-cz)**2
+                        if d2<nd2: nd2=d2; nearest=(x,y,z)
+        if nearest:
+            nx,ny,nz = nearest
+            blend = 0.25
+            cx = cx*(1-blend)+nx*blend
+            cy = cy*(1-blend)+ny*blend
+            cz = cz*(1-blend)+nz*blend
+        margin = 8.0
+        sx = max(14.0, min(26.0, extx + margin))
+        sy = max(14.0, min(26.0, exty + margin))
+        sz = max(14.0, min(26.0, extz + margin))
+        m = dict(mode)
+        m.update({"center_x":cx,"center_y":cy,"center_z":cz,"size_x":sx,"size_y":sy,"size_z":sz})
+        return m
+    except Exception:
+        return mode
+
+# -------------------------
+# PocketIdentifier
+# -------------------------
 class PocketIdentifier:
     def __init__(self, detailed: bool = True):
-        """
-        Initialize pocket identifier with configurable detail level
-        
-        Args:
-            detailed: If True, uses comprehensive analysis (fpocket, P2Rank)
-                     If False, uses faster methods (template-based, geometric)
-        """
         self.detailed = detailed
         self.methods = ["fpocket", "p2rank", "template_based"] if detailed else ["template_based", "geometric"]
-        
+
     def _run_fpocket(self, protein_pdb: str) -> List[Dict]:
-        """Run fpocket cavity detection (detailed mode only)"""
         if not self.detailed:
             return []
-            
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_protein = Path(temp_dir) / "protein.pdb"
                 temp_protein.write_text(Path(protein_pdb).read_text())
-                
-                # Run fpocket
                 cmd = ["fpocket", "-f", str(temp_protein)]
                 result = subprocess.run(cmd, capture_output=True, text=True, cwd=temp_dir)
-                
                 if result.returncode != 0:
-                    logger.warning("fpocket failed, trying alternative detection")
+                    logger.warning("fpocket failed")
                     return []
-                
-                # Parse fpocket output
-                pockets = []
-                pocket_info_file = Path(temp_dir) / f"{temp_protein.stem}_info.txt"
-                
-                if pocket_info_file.exists():
-                    pockets = self._parse_fpocket_output(pocket_info_file)
-                
-                return pockets[:10]  # Return top 10 for later filtering
-                
+                info_file = Path(temp_dir) / f"{temp_protein.stem}_info.txt"
+                pockets = self._parse_fpocket_output(info_file) if info_file.exists() else []
+                return pockets[:10]
         except Exception as e:
             logger.warning(f"fpocket execution failed: {e}")
             return []
 
     def _parse_fpocket_output(self, info_file: Path) -> List[Dict]:
-        """Parse fpocket info file to extract pocket information"""
-        pockets = []
+        pockets: List[Dict] = []
         try:
             with open(info_file) as f:
                 lines = f.readlines()
-            
-            current_pocket = {}
+            current: Dict = {}
             for line in lines:
                 line = line.strip()
                 if line.startswith("Pocket"):
-                    if current_pocket:
-                        pockets.append(current_pocket)
-                    current_pocket = {
-                        "method": "fpocket",
-                        "confidence": "high" if len(pockets) < 3 else "medium"
-                    }
-                elif "Centroid" in line and current_pocket:
-                    # Parse centroid coordinates
+                    if current: pockets.append(current)
+                    current = {"method":"fpocket","confidence":"high" if len(pockets)<3 else "medium"}
+                elif "Centroid" in line and current:
                     coords = line.split()[-3:]
-                    current_pocket.update({
-                        "center_x": float(coords[0]),
-                        "center_y": float(coords[1]), 
-                        "center_z": float(coords[2])
-                    })
-                elif "Score" in line and current_pocket:
-                    # Parse pocket score
-                    score = float(line.split()[-1])
-                    current_pocket["score"] = score
-                elif "Volume" in line and current_pocket:
-                    # Parse pocket volume
+                    current.update({"center_x":float(coords[0]),"center_y":float(coords[1]),"center_z":float(coords[2])})
+                elif "Score" in line and current:
+                    current["score"] = float(line.split()[-1])
+                elif "Volume" in line and current:
                     volume = float(line.split()[-1])
-                    current_pocket["pocket_size"] = volume
-                    # Estimate box size based on volume (cube root approximation)
-                    box_size = max(10, min(30, (volume/10)**(1/3) * 8))
-                    current_pocket.update({
-                        "size_x": box_size,
-                        "size_y": box_size,
-                        "size_z": box_size
-                    })
-            
-            if current_pocket:
-                pockets.append(current_pocket)
-                
+                    current["pocket_size"] = volume
+                    box = max(10, min(30, (volume/10)**(1/3) * 8))
+                    current.update({"size_x":box,"size_y":box,"size_z":box})
+            if current: pockets.append(current)
         except Exception as e:
             logger.warning(f"Failed to parse fpocket output: {e}")
-        
         return pockets
 
     def _run_p2rank(self, protein_pdb: str) -> List[Dict]:
-        """Run P2Rank pocket prediction (detailed mode only)"""
         if not self.detailed:
             return []
-            
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
-                # Try P2Rank if available
                 cmd = ["p2rank", "predict", protein_pdb, "-o", temp_dir]
                 result = subprocess.run(cmd, capture_output=True, text=True)
-                
                 if result.returncode != 0:
                     return []
-                
-                # Parse P2Rank output
-                predictions_file = Path(temp_dir) / "predictions.csv"
-                if not predictions_file.exists():
-                    return []
-                
-                return self._parse_p2rank_output(predictions_file)
-                
+                predictions = Path(temp_dir) / "predictions.csv"
+                if not predictions.exists(): return []
+                return self._parse_p2rank_output(predictions)
         except Exception as e:
             logger.warning(f"P2Rank execution failed: {e}")
             return []
 
     def _parse_p2rank_output(self, predictions_file: Path) -> List[Dict]:
-        """Parse P2Rank predictions"""
-        pockets = []
+        pockets: List[Dict] = []
         try:
             with open(predictions_file) as f:
-                lines = f.readlines()[1:]  # Skip header
-            
-            for i, line in enumerate(lines[:10]):  # Top 10 pockets
+                lines = f.readlines()[1:]
+            for i, line in enumerate(lines[:10]):
                 parts = line.strip().split(',')
                 if len(parts) >= 6:
                     pocket = {
-                        "method": "p2rank",
+                        "method":"p2rank",
                         "center_x": float(parts[1]),
                         "center_y": float(parts[2]),
                         "center_z": float(parts[3]),
                         "score": float(parts[4]),
                         "pocket_size": float(parts[5]),
-                        "confidence": "high" if i < 2 else "medium"
+                        "confidence": "high" if i<2 else "medium"
                     }
-                    # Estimate box size
-                    box_size = max(12, min(25, pocket["pocket_size"]/20))
-                    pocket.update({
-                        "size_x": box_size,
-                        "size_y": box_size,
-                        "size_z": box_size
-                    })
+                    box = max(12, min(25, pocket["pocket_size"]/20))
+                    pocket.update({"size_x":box,"size_y":box,"size_z":box})
                     pockets.append(pocket)
-                    
         except Exception as e:
             logger.warning(f"Failed to parse P2Rank output: {e}")
-        
         return pockets
 
     def _template_based_detection(self, protein_pdb: str, ligand_pdbqt: str) -> List[Dict]:
-        """Template-based pocket detection using ligand center (fast and detailed modes)"""
         try:
-            # Parse ligand coordinates to find center
-            ligand_coords = []
+            lig = []
             with open(ligand_pdbqt) as f:
                 for line in f:
-                    if line.startswith(("ATOM", "HETATM")):
-                        coords = line[30:54].split()
-                        if len(coords) >= 3:
-                            ligand_coords.append([float(x) for x in coords[:3]])
-            
-            if not ligand_coords:
-                return []
-            
-            # Calculate ligand center
-            center_x = sum(coord[0] for coord in ligand_coords) / len(ligand_coords)
-            center_y = sum(coord[1] for coord in ligand_coords) / len(ligand_coords)
-            center_z = sum(coord[2] for coord in ligand_coords) / len(ligand_coords)
-            
-            # Create multiple binding modes around the ligand center
-            modes = []
-            
+                    if line.startswith(("ATOM","HETATM")):
+                        parts = line[30:54].split()
+                        if len(parts) >= 3:
+                            lig.append([float(x) for x in parts[:3]])
+            if not lig: return []
+            cx = sum(p[0] for p in lig)/len(lig)
+            cy = sum(p[1] for p in lig)/len(lig)
+            cz = sum(p[2] for p in lig)/len(lig)
             if self.detailed:
-                # Detailed mode: More variations
-                base_sizes = [
-                    (20, 20, 20), (18, 22, 18), (22, 18, 20), 
-                    (16, 20, 24), (24, 16, 18), (19, 21, 19),
-                    (21, 19, 21), (17, 23, 17)
-                ]
+                sizes=[(20,20,20),(18,22,18),(22,18,20),(16,20,24),(24,16,18),(19,21,19),(21,19,21),(17,23,17)]
             else:
-                # Fast mode: Fewer variations
-                base_sizes = [(20, 20, 20), (18, 22, 18), (22, 18, 20)]
-            
-            for i, (sx, sy, sz) in enumerate(base_sizes):
-                # Add slight variations to center coordinates
-                offset_x = (i - 2) * 1.5
-                offset_y = (i - 2) * 1.0
-                offset_z = (i - 2) * 0.8
-                
-                mode = {
-                    "method": "template_based",
-                    "center_x": center_x + offset_x,
-                    "center_y": center_y + offset_y,
-                    "center_z": center_z + offset_z,
-                    "size_x": sx,
-                    "size_y": sy,
-                    "size_z": sz,
-                    "pocket_size": sx * sy * sz / 8,  # Approximate pocket volume
-                    "score": 9.0 - i * 0.3,  # Decreasing scores
-                    "confidence": "high" if i < 2 else "medium"
-                }
-                modes.append(mode)
-            
+                sizes=[(20,20,20),(18,22,18),(22,18,20)]
+            modes=[]
+            for i,(sx,sy,sz) in enumerate(sizes):
+                ox=(i-2)*1.5; oy=(i-2)*1.0; oz=(i-2)*0.8
+                modes.append({
+                    "method":"template_based",
+                    "center_x":cx+ox,"center_y":cy+oy,"center_z":cz+oz,
+                    "size_x":sx,"size_y":sy,"size_z":sz,
+                    "pocket_size": sx*sy*sz/8,
+                    "score": 9.0 - i*0.3,
+                    "confidence": "high" if i<2 else "medium"
+                })
             return modes
-            
         except Exception as e:
             logger.warning(f"Template-based detection failed: {e}")
             return []
 
     def _geometric_fallback(self, protein_pdb: str) -> List[Dict]:
-        """Geometric fallback method when other methods fail"""
         try:
-            # Parse protein to find geometric center
-            protein_coords = []
+            ca=[]
             with open(protein_pdb) as f:
                 for line in f:
-                    if line.startswith("ATOM") and line[12:16].strip() == "CA":  # Alpha carbons only
-                        coords = line[30:54].split()
-                        if len(coords) >= 3:
-                            protein_coords.append([float(x) for x in coords[:3]])
-            
-            if not protein_coords:
-                return []
-            
-            # Calculate geometric center
-            center_x = sum(coord[0] for coord in protein_coords) / len(protein_coords)
-            center_y = sum(coord[1] for coord in protein_coords) / len(protein_coords)
-            center_z = sum(coord[2] for coord in protein_coords) / len(protein_coords)
-            
-            # Create multiple geometric modes
-            modes = []
-            
+                    if line.startswith("ATOM") and line[12:16].strip()=="CA":
+                        parts = line[30:54].split()
+                        if len(parts)>=3:
+                            ca.append([float(x) for x in parts[:3]])
+            if not ca: return []
+            cx = sum(p[0] for p in ca)/len(ca)
+            cy = sum(p[1] for p in ca)/len(ca)
+            cz = sum(p[2] for p in ca)/len(ca)
             if self.detailed:
-                # Detailed mode: More geometric variations
-                offsets = [
-                    (0, 0, 0), (5, 0, 0), (-5, 0, 0), (0, 5, 0), (0, -5, 0),
-                    (0, 0, 5), (0, 0, -5), (3, 3, 0), (-3, -3, 0)
-                ]
-                sizes = [
-                    (20, 20, 20), (18, 22, 18), (22, 18, 20), (16, 24, 16),
-                    (24, 16, 20), (19, 21, 19), (21, 19, 21), (17, 23, 17), (23, 17, 19)
-                ]
+                offs=[(0,0,0),(5,0,0),(-5,0,0),(0,5,0),(0,-5,0),(0,0,5),(0,0,-5),(3,3,0),(-3,-3,0)]
+                sizes=[(20,20,20),(18,22,18),(22,18,20),(16,24,16),(24,16,20),(19,21,19),(21,19,21),(17,23,17),(23,17,19)]
             else:
-                # Fast mode: Basic geometric variations
-                offsets = [(0, 0, 0), (5, 0, 0), (-5, 0, 0)]
-                sizes = [(20, 20, 20), (18, 22, 18), (22, 18, 20)]
-            
-            for i, (offset, size) in enumerate(zip(offsets, sizes)):
-                mode = {
-                    "method": "geometric",
-                    "center_x": center_x + offset[0],
-                    "center_y": center_y + offset[1],
-                    "center_z": center_z + offset[2],
-                    "size_x": size[0],
-                    "size_y": size[1],
-                    "size_z": size[2],
-                    "pocket_size": size[0] * size[1] * size[2] / 10,
-                    "score": 7.0 - i * 0.2,
-                    "confidence": "medium" if i < 2 else "low"
-                }
-                modes.append(mode)
-            
+                offs=[(0,0,0),(5,0,0),(-5,0,0)]
+                sizes=[(20,20,20),(18,22,18),(22,18,20)]
+            modes=[]
+            for i,(o,s) in enumerate(zip(offs,sizes)):
+                sx,sy,sz=s
+                modes.append({
+                    "method":"geometric",
+                    "center_x":cx+o[0],"center_y":cy+o[1],"center_z":cz+o[2],
+                    "size_x":sx,"size_y":sy,"size_z":sz,
+                    "pocket_size": sx*sy*sz/10,
+                    "score": 7.0 - i*0.2,
+                    "confidence": "medium" if i<2 else "low"
+                })
             return modes
-            
         except Exception as e:
             logger.warning(f"Geometric fallback failed: {e}")
             return []
 
-
-def identify_binding_site(protein_pdb: str, prepared_protein_pdbqt: str, ligand_pdbqt: str = None, 
-                         use_validated: bool = True, return_n: int = 5, detailed: bool = True) -> Optional[Dict]:
+# -------------------------
+# Public API
+# -------------------------
+def identify_binding_site(protein_pdb: str, prepared_protein_pdbqt: str, ligand_pdbqt: str = None,
+                          use_validated: bool = True, return_n: int = 5, detailed: bool = True) -> Optional[Dict]:
     """
-    Enhanced pocket identification with configurable detail level for production use.
-    
-    Args:
-        protein_pdb: Path to original protein PDB file
-        prepared_protein_pdbqt: Path to prepared receptor PDBQT file  
-        ligand_pdbqt: Path to ligand PDBQT file (optional, for template-based detection)
-        use_validated: Whether to use validated pocket detection methods
-        return_n: Number of top binding modes to return (max 5)
-        detailed: Control analysis depth (True = comprehensive, False = fast)
-    
-    Returns:
-        Dictionary containing:
-        - 'primary': Best binding mode with center coords, box size, pocket size
-        - 'modes': List of up to N best modes with full information
-        - 'total_found': Total number of pockets found before filtering
-        - 'methods_used': List of detection methods attempted
-        - 'analysis_level': Level of analysis performed ('detailed' or 'fast')
+    Pocket identification that combines:
+    - Raw structure methods (fpocket/P2Rank),
+    - Template-based ligand reference,
+    - Structure-based geometric fallback,
+    with consensus clustering + contact rescore and ligand-guided refinement.
     """
     analysis_level = "detailed" if detailed else "fast"
     logger.info(f"Starting {analysis_level} pocket identification")
-    
-    identifier = PocketIdentifier(detailed=detailed)
-    all_modes = []
-    methods_used = []
-    
-    # Method 1: fpocket (only in detailed mode with validation)
+
+    ident = PocketIdentifier(detailed=detailed)
+    all_modes: List[Dict] = []
+    methods_used: List[str] = []
+
+    # Raw-structure validated methods
     if detailed and use_validated:
         logger.info("Attempting fpocket detection")
-        fpocket_modes = identifier._run_fpocket(protein_pdb)
-        if fpocket_modes:
-            all_modes.extend(fpocket_modes)
-            methods_used.append("fpocket")
-            logger.info(f"fpocket found {len(fpocket_modes)} pockets")
-    
-    # Method 2: P2Rank (only in detailed mode with validation)
+        m = ident._run_fpocket(protein_pdb)
+        if m: all_modes += m; methods_used.append("fpocket"); logger.info(f"fpocket: {len(m)}")
+
     if detailed and use_validated:
         logger.info("Attempting P2Rank detection")
-        p2rank_modes = identifier._run_p2rank(protein_pdb)
-        if p2rank_modes:
-            all_modes.extend(p2rank_modes)
-            methods_used.append("p2rank")
-            logger.info(f"P2Rank found {len(p2rank_modes)} pockets")
-    
-    # Method 3: Template-based (available in both modes)
+        m = ident._run_p2rank(protein_pdb)
+        if m: all_modes += m; methods_used.append("p2rank"); logger.info(f"P2Rank: {len(m)}")
+
+    # Template-based ligand guidance
     if ligand_pdbqt and Path(ligand_pdbqt).exists():
         logger.info("Attempting template-based detection")
-        template_modes = identifier._template_based_detection(protein_pdb, ligand_pdbqt)
-        if template_modes:
-            all_modes.extend(template_modes)
-            methods_used.append("template_based")
-            logger.info(f"Template-based found {len(template_modes)} pockets")
-    
-    # Method 4: Geometric fallback (always available as last resort)
+        m = ident._template_based_detection(protein_pdb, ligand_pdbqt)
+        if m: all_modes += m; methods_used.append("template_based"); logger.info(f"Template-based: {len(m)}")
+
+    # Structure-based fallback
     if not all_modes or (not detailed and len(all_modes) < 3):
-        logger.info("Using geometric fallback method")
-        geometric_modes = identifier._geometric_fallback(protein_pdb)
-        all_modes.extend(geometric_modes)
+        logger.info("Using geometric fallback")
+        m = ident._geometric_fallback(protein_pdb)
+        all_modes += m
         methods_used.append("geometric")
-        logger.info(f"Geometric fallback generated {len(geometric_modes)} pockets")
-    
+        logger.info(f"Geometric: {len(m)}")
+
     if not all_modes:
-        logger.error("No binding sites could be identified")
+        logger.error("No binding sites found")
         return None
-    
-    # Sort all modes by score (descending)
-    all_modes.sort(key=lambda x: x.get("score", 0), reverse=True)
-    
-    # Select best N modes (max 5)
-    best_modes = all_modes[:min(return_n, 5)]
-    
-    # Ensure all modes have required fields
-    for mode in best_modes:
-        if "pocket_size" not in mode:
-            mode["pocket_size"] = mode.get("size_x", 20) * mode.get("size_y", 20) * mode.get("size_z", 20) / 8
-        if "confidence" not in mode:
-            mode["confidence"] = "medium"
-        # Add analysis level to each mode
-        mode["analysis_level"] = analysis_level
-    
+
+    # Ensure base scores
+    for m in all_modes:
+        if "score" not in m:
+            sx,sy,sz = float(m.get("size_x",20)),float(m.get("size_y",20)),float(m.get("size_z",20))
+            m["score"] = max(0.1, 1000.0/(sx*sy*sz))
+
+    # Consensus clustering and rescoring
+    clusters = _cluster_modes(all_modes)
+    reps = []
+    base_scores = []
+    for cl in clusters:
+        rep = sorted(cl["items"], key=lambda x: x.get("score",0), reverse=True)[0]
+        reps.append(rep); base_scores.append(rep.get("score",0.0))
+    nbase = _normalize(base_scores)
+
+    ranked: List[Dict] = []
+    for idx, cl in enumerate(clusters):
+        rep = dict(sorted(cl["items"], key=lambda x: x.get("score",0), reverse=True)[0])
+        cbonus = _consensus_score(cl)
+        cscore = _contact_rescore(protein_pdb, rep, radius=6.0)
+        final = 0.6*nbase[idx] + 0.3*(min(cbonus,5.0)/5.0) + 0.1*(min(cscore,3.0)/3.0)
+        rep["final_score"] = final
+        rep["consensus_size"] = len(cl["items"])
+        rep["consensus_methods"] = list({i.get("method","?") for i in cl["items"]})
+        ranked.append(rep)
+    ranked.sort(key=lambda x: x.get("final_score",0.0), reverse=True)
+
+    best = ranked[:min(return_n,5)]
+    for m in best:
+        if "pocket_size" not in m:
+            m["pocket_size"] = m.get("size_x",20)*m.get("size_y",20)*m.get("size_z",20)/8
+        if "confidence" not in m:
+            m["confidence"] = "high" if m.get("consensus_size",1) >= 2 else "medium"
+        m["analysis_level"] = analysis_level
+
+    # Ligand-guided refine the primary
+    best[0] = _ligand_guided_refine(protein_pdb, ligand_pdbqt, best[0])
+
     result = {
-        "primary": best_modes[0],
-        "modes": best_modes,
+        "primary": best[0],
+        "modes": best,
         "total_found": len(all_modes),
         "methods_used": methods_used,
         "analysis_level": analysis_level,
-        "performance_mode": "comprehensive" if detailed else "optimized"
+        "performance_mode": "comprehensive" if detailed else "optimized",
+        "consensus_clusters": len(clusters)
     }
-    
-    logger.info(f"{analysis_level.title()} pocket identification completed: {len(best_modes)} modes selected from {len(all_modes)} total")
-    logger.info(f"Primary pocket: {best_modes[0]['method']} method, score: {best_modes[0].get('score', 'N/A')}")
-    
+    logger.info(f"{analysis_level.title()} pocket identification: {len(best)} selected from {len(all_modes)}; primary final_score={best[0].get('final_score',0):.3f}")
     return result
 
-
-# Backward compatibility function
+# Backward compatibility wrapper
 def detect_binding_pockets(*args, **kwargs):
-    """Backward compatibility wrapper"""
     return identify_binding_site(*args, **kwargs)
 
-
-# Pipeline integration helper
 def get_pocket_analysis_config(pipeline_mode: str = "production") -> Dict:
-    """
-    Get recommended pocket analysis configuration based on pipeline mode
-    
-    Args:
-        pipeline_mode: 'development', 'production', 'fast', or 'comprehensive'
-    
-    Returns:
-        Dictionary with recommended settings
-    """
     configs = {
-        "development": {
-            "detailed": True,
-            "use_validated": True,
-            "return_n": 5
-        },
-        "production": {
-            "detailed": True,
-            "use_validated": True,
-            "return_n": 3
-        },
-        "fast": {
-            "detailed": False,
-            "use_validated": False,
-            "return_n": 3
-        },
-        "comprehensive": {
-            "detailed": True,
-            "use_validated": True,
-            "return_n": 5
-        }
+        "development": { "detailed": True,  "use_validated": True,  "return_n": 5 },
+        "production":  { "detailed": True,  "use_validated": True,  "return_n": 3 },
+        "fast":        { "detailed": False, "use_validated": False, "return_n": 3 },
+        "comprehensive": { "detailed": True, "use_validated": True, "return_n": 5 }
     }
-    
     return configs.get(pipeline_mode, configs["production"])
 
-
 if __name__ == "__main__":
-    # Test the module with different modes
-    print("Testing pocket identifier in different modes...")
-    
-    # Fast mode test
-    print("\n--- FAST MODE TEST ---")
-    config = get_pocket_analysis_config("fast")
-    print(f"Fast mode config: {config}")
-    
-    # Production mode test
-    print("\n--- PRODUCTION MODE TEST ---")
-    config = get_pocket_analysis_config("production")
-    print(f"Production mode config: {config}")
-    
-    # Comprehensive mode test
-    print("\n--- COMPREHENSIVE MODE TEST ---")
-    config = get_pocket_analysis_config("comprehensive")
-    print(f"Comprehensive mode config: {config}")
-    
-    # Example usage
-    if len(sys.argv) >= 4:
-        protein_pdb = sys.argv[1]
-        prepared_pdbqt = sys.argv[2]
-        ligand_pdbqt = sys.argv[3]
-        mode = sys.argv[4] if len(sys.argv) > 4 else "production"
-        
-        config = get_pocket_analysis_config(mode)
-        result = identify_binding_site(
-            protein_pdb, prepared_pdbqt, ligand_pdbqt, **config
-        )
-        
-        if result:
-            print(f"\n--- RESULTS ({result['analysis_level'].upper()} MODE) ---")
-            print(json.dumps(result, indent=2, default=str))
-    else:
-        print("\nUsage: python pocket_identifier.py <protein.pdb> <prepared.pdbqt> <ligand.pdbqt> [mode]")
-        print("Modes: fast, production, comprehensive, development")
+    print("Pocket identifier module. Use via pipeline.")

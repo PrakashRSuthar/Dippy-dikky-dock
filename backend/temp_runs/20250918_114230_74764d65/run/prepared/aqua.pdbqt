@@ -1,0 +1,11 @@
+REMARK  Name = 962
+REMARK  0 active torsions:
+REMARK  status: ('A' for Active; 'I' for Inactive)
+REMARK                            x       y       z     vdW  Elec       q    Type
+REMARK                         _______ _______ _______ _____ _____    ______ ____
+ROOT
+ATOM      1  O   HOH     1       2.537  -0.155   0.000  0.00  0.00    -0.410 OA
+ATOM      2  H   HOH     0       3.074   0.155   0.000  0.00  0.00    +0.205 HD
+ATOM      3  H   HOH     0       2.000   0.155   0.000  0.00  0.00    +0.205 HD
+ENDROOT
+TORSDOF 0

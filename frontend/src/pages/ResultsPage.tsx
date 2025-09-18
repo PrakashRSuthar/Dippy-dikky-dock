@@ -58,20 +58,22 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
   const fetchResults = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
+      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
       
       // Fetch results
-      const resultsResponse = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/api/jobs/${jobId}/result`);
-      
+      const resultsResponse = await fetch(`${apiBase}/api/jobs/${jobId}/result`);
       if (!resultsResponse.ok) {
-        throw new Error('Failed to fetch results');
+        const errorData = await resultsResponse.json();
+        throw new Error(errorData.detail || 'Failed to fetch results');
       }
-
       const resultsData = await resultsResponse.json();
       setResults(resultsData);
       
       // Fetch file list
       try {
-        const filesResponse = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/api/jobs/${jobId}/files`);
+        const filesResponse = await fetch(`${apiBase}/api/jobs/${jobId}/files`);
         if (filesResponse.ok) {
           const filesData = await filesResponse.json();
           setFiles(filesData.files || []);
@@ -80,17 +82,17 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
         console.warn('Failed to fetch file list:', err);
       }
       
-      // Simulate pose data (in real implementation, this would come from your CSV)
+      // Simulate pose data (you can replace this with actual CSV parsing)
       const mockPoses = Array.from({ length: resultsData.total_poses }, (_, i) => ({
         pose: i + 1,
-        affinity: (resultsData.best_affinity + Math.random() * 3).toFixed(2),
+        affinity: (resultsData.best_affinity + Math.random() * 2 * (i / resultsData.total_poses)).toFixed(2),
         rmsd_lb: (Math.random() * 2).toFixed(2),
         rmsd_ub: (Math.random() * 3 + 1).toFixed(2),
       }));
       setPoseData(mockPoses);
       
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load results');
+      setError(err instanceof Error ? err.message : 'An unknown error occurred');
     } finally {
       setLoading(false);
     }
@@ -118,7 +120,7 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">Loading docking results...</p>
+          <p className="text-gray-600">Loading docking results for Job ID: {jobId}</p>
         </div>
       </div>
     );
@@ -126,17 +128,25 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <XCircle className="w-16 h-16 text-red-600 mx-auto mb-4" />
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="text-center bg-white p-8 rounded-lg shadow-md border border-red-200">
+          <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-gray-800 mb-2">Error Loading Results</h2>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <button
-            onClick={onBack}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-          >
-            Go Back
-          </button>
+          <p className="text-gray-600 mb-6 max-w-md">{error}</p>
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={onBack}
+              className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
+            >
+              Go Back
+            </button>
+            <button
+              onClick={fetchResults}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -146,7 +156,7 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-gray-600">No results available</p>
+          <p className="text-gray-600">No results available for this job.</p>
         </div>
       </div>
     );
@@ -155,7 +165,7 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b">
+      <div className="bg-white border-b sticky top-0 z-10">
         <div className="max-w-full mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
@@ -171,7 +181,7 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
                   <CheckCircle className="w-6 h-6 text-green-600" />
                   <span>Docking Results</span>
                 </h1>
-                <p className="text-sm text-gray-600">Job ID: {jobId}</p>
+                <p className="text-sm text-gray-600 font-mono">Job ID: {jobId}</p>
               </div>
             </div>
             <div className="flex items-center space-x-3">
@@ -191,7 +201,7 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
 
       <div className="max-w-full mx-auto px-4 py-6">
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl border shadow-sm p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -199,7 +209,7 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
                 <p className="text-2xl font-bold text-green-600">{results.best_affinity}</p>
                 <p className="text-xs text-gray-500">kcal/mol</p>
               </div>
-              <Zap className="w-8 h-8 text-green-600" />
+              <Zap className="w-8 h-8 text-green-600 opacity-70" />
             </div>
           </div>
 
@@ -208,9 +218,9 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
               <div>
                 <p className="text-sm text-gray-600">Total Poses</p>
                 <p className="text-2xl font-bold text-blue-600">{results.total_poses}</p>
-                <p className="text-xs text-gray-500">conformations</p>
+                <p className="text-xs text-gray-500">conformations found</p>
               </div>
-              <Atom className="w-8 h-8 text-blue-600" />
+              <Atom className="w-8 h-8 text-blue-600 opacity-70" />
             </div>
           </div>
 
@@ -221,33 +231,31 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
                 <p className="text-2xl font-bold text-purple-600">{results.all_pockets?.length || 1}</p>
                 <p className="text-xs text-gray-500">detected</p>
               </div>
-              <BarChart3 className="w-8 h-8 text-purple-600" />
+              <BarChart3 className="w-8 h-8 text-purple-600 opacity-70" />
             </div>
           </div>
 
           <div className="bg-white rounded-xl border shadow-sm p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Primary Pocket</p>
+                <p className="text-sm text-gray-600">Primary Pocket Size</p>
                 <p className="text-lg font-bold text-orange-600">
                   {results.pocket_size[0].toFixed(1)}×{results.pocket_size[1].toFixed(1)}×{results.pocket_size[2].toFixed(1)}
                 </p>
-                <p className="text-xs text-gray-500">Ångströms³</p>
+                <p className="text-xs text-gray-500">Ångströms</p>
               </div>
-              <div className="w-8 h-8 text-orange-600 text-2xl">📦</div>
+              <div className="text-3xl opacity-70">📦</div>
             </div>
           </div>
         </div>
-
-        {/* ENHANCED LAYOUT: Full Width Top Section + Two Column Bottom */}
+        
         <div className="space-y-6">
-          
-          {/* TOP SECTION: Large 3D Visualization + Binding Pockets Table */}
+          {/* TOP SECTION: Visualization + Pockets */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
             
-            {/* EXPANDED 3D Visualization - Takes 2/3 width on XL screens */}
+            {/* 3D Visualization */}
             <div className="xl:col-span-2 bg-white rounded-xl border shadow-sm">
-              <div className="px-6 py-4 border-b">
+              <div className="px-6 py-4 border-b flex justify-between items-center">
                 <h2 className="text-lg font-semibold flex items-center space-x-2">
                   <span>🔬</span>
                   <span>Docked Complex</span>
@@ -256,77 +264,28 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
                   </span>
                 </h2>
               </div>
-              <div className="p-6">
-                {/* MUCH LARGER VISUALIZATION - Increased from h-80 to h-[600px] */}
-                <div className="h-[600px] border border-gray-200 rounded-lg bg-gray-50">
+              <div className="p-4 md:p-6">
+                <div className="h-[50vh] min-h-[500px] border border-gray-200 rounded-lg bg-gray-50">
                   <MoleculeVisualization 
-                    moleculePath={results.files?.docked_poses}
-                    moleculeType="complex"
-                    color="#8b5cf6"
+                    // ✅ FIX: Switched to proteinPath and dockedPath for results mode
+                    proteinPath={results.files?.prepared_protein}
+                    dockedPath={results.files?.docked_poses}
                     height="100%"
                     pocketInfo={{
                       center: results.pocket_center,
                       size: results.pocket_size,
-                      confidence: results.confidence,
-                      method: results.method
                     }}
                     allPockets={results.all_pockets}
                     selectedPose={selectedPose}
                     showPockets={true}
-                    jobId={jobId}
                     isResultsMode={true}
                     poseData={poseData}
                   />
                 </div>
-                
-                {/* Enhanced Pose Controls */}
-                <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Pose Selector */}
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm text-gray-600 font-medium">Pose:</span>
-                    <select
-                      value={selectedPose}
-                      onChange={(e) => setSelectedPose(Number(e.target.value))}
-                      className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      {poseData.map((_, idx) => (
-                        <option key={idx} value={idx}>
-                          Pose {idx + 1} ({poseData[idx]?.affinity} kcal/mol)
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  {/* Navigation Buttons */}
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => setSelectedPose(Math.max(0, selectedPose - 1))}
-                      disabled={selectedPose === 0}
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      ← Previous
-                    </button>
-                    <button
-                      onClick={() => setSelectedPose(Math.min(poseData.length - 1, selectedPose + 1))}
-                      disabled={selectedPose === poseData.length - 1}
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      Next →
-                    </button>
-                  </div>
-
-                  {/* Current Pose Info */}
-                  <div className="text-center">
-                    <div className="text-sm text-gray-600">Current Affinity</div>
-                    <div className="text-lg font-bold text-green-600">
-                      {poseData[selectedPose]?.affinity} kcal/mol
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
 
-            {/* Binding Pockets Table - Takes 1/3 width */}
+            {/* Binding Pockets List */}
             <div className="bg-white rounded-xl border shadow-sm flex flex-col">
               <div className="px-6 py-4 border-b">
                 <h2 className="text-lg font-semibold flex items-center space-x-2">
@@ -337,18 +296,16 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
                   </span>
                 </h2>
               </div>
-              <div className="p-4 flex-1 overflow-auto">
+              <div className="p-4 flex-1 overflow-auto" style={{ maxHeight: 'calc(50vh + 100px)' }}>
                 <div className="space-y-3">
                   {results.all_pockets?.map((pocket, idx) => (
-                    <div key={idx} className={`p-3 border rounded-lg transition-colors hover:bg-gray-50 ${
-                      idx === 0 ? 'bg-blue-50 border-blue-200' : 'border-gray-200'
-                    }`}>
+                    <div key={idx} className={`p-3 border rounded-lg transition-colors hover:bg-gray-50 ${idx === 0 ? 'bg-blue-50 border-blue-200' : 'border-gray-200'}`}>
                       <div className="flex items-center justify-between mb-2">
                         <div className="font-medium text-sm">
                           {idx === 0 && <span className="text-blue-600">★ </span>}
                           Pocket {idx + 1}
                         </div>
-                        <span className={`px-2 py-1 rounded-full text-xs ${
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                           pocket.confidence === 'high' ? 'bg-green-100 text-green-800' :
                           pocket.confidence === 'medium' ? 'bg-yellow-100 text-yellow-800' :
                           'bg-gray-100 text-gray-800'
@@ -358,7 +315,7 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
                       </div>
                       <div className="text-xs text-gray-600 space-y-1">
                         <div><strong>Center:</strong> ({pocket.center?.map((c: number) => c.toFixed(1)).join(', ')})</div>
-                        <div><strong>Size:</strong> {pocket.size?.map((s: number) => s.toFixed(1)).join('×')} Ų</div>
+                        <div><strong>Size:</strong> {pocket.size?.map((s: number) => s.toFixed(1)).join('×')} Å</div>
                         <div><strong>Method:</strong> {pocket.method}</div>
                       </div>
                     </div>
@@ -368,187 +325,34 @@ export const ResultsPage = ({ jobId, onBack }: ResultsPageProps) => {
             </div>
           </div>
 
-          {/* BOTTOM SECTION: Two Column Layout */}
+          {/* BOTTOM SECTION: Chart and Table */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
-            {/* Left Column */}
-            <div className="space-y-6">
-              
-              {/* Binding Affinity Chart */}
-              <div className="bg-white rounded-xl border shadow-sm">
-                <div className="px-6 py-4 border-b">
-                  <h2 className="text-lg font-semibold flex items-center space-x-2">
-                    <span>📊</span>
-                    <span>Binding Affinity Distribution</span>
-                  </h2>
-                </div>
-                <div className="p-6">
-                  <div className="h-64">
-                    <ResultsChart data={poseData} selectedPose={selectedPose} />
-                  </div>
-                </div>
+            <div className="bg-white rounded-xl border shadow-sm">
+              <div className="px-6 py-4 border-b">
+                <h2 className="text-lg font-semibold flex items-center space-x-2">
+                  <span>📊</span>
+                  <span>Binding Affinity Distribution</span>
+                </h2>
               </div>
-
-              {/* Results Table */}
-              <div className="bg-white rounded-xl border shadow-sm">
-                <div className="px-6 py-4 border-b">
-                  <h2 className="text-lg font-semibold flex items-center space-x-2">
-                    <span>📋</span>
-                    <span>Docking Poses</span>
-                  </h2>
-                </div>
-                <div className="p-6">
-                  <ResultsTable 
-                    data={poseData} 
-                    selectedPose={selectedPose}
-                    onPoseSelect={setSelectedPose}
-                  />
+              <div className="p-6">
+                <div className="h-64">
+                  <ResultsChart data={poseData} selectedPose={selectedPose} />
                 </div>
               </div>
             </div>
-
-            {/* Right Column */}
-            <div className="space-y-6">
-              
-              {/* Generated Files */}
-              <div className="bg-white rounded-xl border shadow-sm">
-                <div className="px-6 py-4 border-b">
-                  <h2 className="text-lg font-semibold flex items-center space-x-2">
-                    <span>📁</span>
-                    <span>Generated Files</span>
-                    <span className="text-sm bg-green-100 text-green-800 px-2 py-1 rounded-full">
-                      {files.length} files
-                    </span>
-                  </h2>
-                </div>
-                <div className="p-6">
-                  {files.length > 0 ? (
-                    <div className="space-y-3">
-                      {files.map((file, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-                          <div className="flex items-center space-x-3 min-w-0 flex-1">
-                            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                              <span className="text-sm">📄</span>
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="font-medium text-sm">{file.name}</div>
-                              <div className="text-xs text-gray-500">{file.filename} • {file.size}</div>
-                              <div className="text-xs text-gray-400 font-mono truncate">
-                                {file.path}
-                              </div>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => downloadFile(file.download_url, file.filename)}
-                            className="px-3 py-1 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors flex-shrink-0 ml-3"
-                          >
-                            Download
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      <div className="text-4xl mb-2">📄</div>
-                      <p>No files available for download</p>
-                    </div>
-                  )}
-                  
-                  {files.length > 0 && (
-                    <div className="mt-4 pt-4 border-t">
-                      <button
-                        onClick={downloadAllFiles}
-                        className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                      >
-                        📦 Download All Files
-                      </button>
-                    </div>
-                  )}
-                </div>
+            <div className="bg-white rounded-xl border shadow-sm">
+              <div className="px-6 py-4 border-b">
+                <h2 className="text-lg font-semibold flex items-center space-x-2">
+                  <span>📋</span>
+                  <span>Docking Poses</span>
+                </h2>
               </div>
-
-              {/* Data Retention Status */}
-              <div className="bg-white rounded-xl border shadow-sm">
-                <div className="px-6 py-4 border-b">
-                  <h2 className="text-lg font-semibold flex items-center space-x-2">
-                    <span>💾</span>
-                    <span>Data Retention</span>
-                  </h2>
-                </div>
-                <div className="p-6">
-                  <div className={`p-4 rounded-lg border-2 ${
-                    results.retention === 'save' ? 'bg-green-50 border-green-200' :
-                    results.retention === 'delete' ? 'bg-red-50 border-red-200' :
-                    'bg-yellow-50 border-yellow-200'
-                  }`}>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-2xl">
-                        {results.retention === 'save' ? '💾' : results.retention === 'delete' ? '🗑️' : '⏳'}
-                      </span>
-                      <div>
-                        <div className="font-medium">
-                          {results.retention === 'save' ? 'Saved Permanently' :
-                           results.retention === 'delete' ? 'Will Be Deleted' :
-                           'Temporary Storage (7 days)'}
-                        </div>
-                        <div className="text-sm text-gray-600">
-                          {results.retention === 'save' ? 'Files are stored permanently in data/results/' :
-                           results.retention === 'delete' ? 'All files will be deleted after processing' :
-                           'Files will be automatically deleted in 7 days'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {results.permanent_location && (
-                    <div className="mt-3 p-3 bg-blue-50 rounded-lg">
-                      <div className="text-sm">
-                        <strong>Permanent Location:</strong>
-                        <div className="font-mono text-xs mt-1 text-blue-800 break-all">
-                          {results.permanent_location}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Analysis Summary */}
-              <div className="bg-white rounded-xl border shadow-sm">
-                <div className="px-6 py-4 border-b">
-                  <h2 className="text-lg font-semibold flex items-center space-x-2">
-                    <span>🧪</span>
-                    <span>Analysis Summary</span>
-                  </h2>
-                </div>
-                <div className="p-6 space-y-4">
-                  <div>
-                    <h3 className="font-medium text-gray-900 mb-2">Protein Analysis</h3>
-                    <p className="text-sm text-gray-600">{results.protein_analysis}</p>
-                  </div>
-                  
-                  <div>
-                    <h3 className="font-medium text-gray-900 mb-2">Primary Binding Site</h3>
-                    <div className="text-sm text-gray-600 space-y-1">
-                      <p><strong>Center:</strong> ({results.pocket_center.map(c => c.toFixed(1)).join(', ')})</p>
-                      <p><strong>Size:</strong> {results.pocket_size.map(s => s.toFixed(1)).join(' × ')} Ų</p>
-                      <p><strong>Method:</strong> {results.method}</p>
-                      <p><strong>Confidence:</strong> {results.confidence}</p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 className="font-medium text-gray-900 mb-2">Cleaning Policy</h3>
-                    <div className="text-sm text-gray-600">
-                      <div className="grid grid-cols-2 gap-2">
-                        <span>Waters: {results.cleaning_policy?.keep_waters ? '✅ Kept' : '❌ Removed'}</span>
-                        <span>Ions: {results.cleaning_policy?.keep_ions ? '✅ Kept' : '❌ Removed'}</span>
-                        <span>Solvents: {results.cleaning_policy?.keep_solvents ? '✅ Kept' : '❌ Removed'}</span>
-                        <span>Cofactors: {results.cleaning_policy?.keep_cofactors ? '✅ Kept' : '❌ Removed'}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+              <div className="p-6">
+                <ResultsTable 
+                  data={poseData} 
+                  selectedPose={selectedPose}
+                  onPoseSelect={setSelectedPose}
+                />
               </div>
             </div>
           </div>

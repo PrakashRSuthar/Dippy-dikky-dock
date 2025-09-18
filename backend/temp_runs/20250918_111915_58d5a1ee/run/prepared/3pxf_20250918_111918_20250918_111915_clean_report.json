@@ -1,0 +1,28 @@
+{
+  "summary": {
+    "waters": 192,
+    "solvents": 0,
+    "ions": 0,
+    "cofactors": 0,
+    "hetatm_total": 254
+  },
+  "final_report": {
+    "policy": {
+      "keep_waters": false,
+      "keep_ions": true,
+      "keep_solvents": false,
+      "keep_cofactors": true
+    },
+    "removed": {
+      "waters": 192,
+      "solvents": 0,
+      "ions": 0,
+      "cofactors": 0,
+      "altloc": 0
+    },
+    "kept": {
+      "protein": 2438,
+      "hetatm": 62
+    }
+  }
+}
