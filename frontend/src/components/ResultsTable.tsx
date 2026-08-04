@@ -1,5 +1,4 @@
 // src/components/ResultsTable.tsx
-import React from 'react';
 
 interface Pose {
   pose: number;

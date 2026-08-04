@@ -17,10 +17,10 @@ class StandaloneResourceMonitor:
     def monitor(self):
         """Start monitoring - runs until Ctrl+C"""
         self.start_time = datetime.now()
-        print(f"🔍 Resource monitoring started at {self.start_time.strftime('%H:%M:%S')}")
-        print(f"📊 Sampling every {self.interval} seconds")
-        print("🚀 Start your docking pipeline now")
-        print("⏹️  Press Ctrl+C to stop monitoring and get report")
+        print(f" Resource monitoring started at {self.start_time.strftime('%H:%M:%S')}")
+        print(f" Sampling every {self.interval} seconds")
+        print(" Start your docking pipeline now")
+        print("⏹  Press Ctrl+C to stop monitoring and get report")
         print("-" * 50)
         
         try:
@@ -58,7 +58,7 @@ class StandaloneResourceMonitor:
     def generate_report(self):
         """Generate and display resource usage report"""
         if not self.data:
-            print("❌ No data collected")
+            print(" No data collected")
             return
         
         end_time = datetime.now()
@@ -71,26 +71,26 @@ class StandaloneResourceMonitor:
         disk_free = [d['disk_free_gb'] for d in self.data]
         
         print(f"\n" + "="*60)
-        print(f"📊 RESOURCE USAGE REPORT")
+        print(f" RESOURCE USAGE REPORT")
         print(f"="*60)
         
-        print(f"⏱️  Monitoring Duration: {duration:.1f} minutes")
-        print(f"📈 Total Samples: {len(self.data)}")
-        print(f"🕐 Start Time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"🕐 End Time: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"⏱  Monitoring Duration: {duration:.1f} minutes")
+        print(f" Total Samples: {len(self.data)}")
+        print(f" Start Time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f" End Time: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        print(f"\n💻 CPU Usage:")
+        print(f"\n CPU Usage:")
         print(f"   • Average: {sum(cpu_values)/len(cpu_values):.1f}%")
         print(f"   • Minimum: {min(cpu_values):.1f}%")
         print(f"   • Maximum: {max(cpu_values):.1f}%")
         
-        print(f"\n🧠 Memory Usage:")
+        print(f"\n Memory Usage:")
         print(f"   • Average Used: {sum(memory_used)/len(memory_used):.1f} GB")
         print(f"   • Average Available: {sum(memory_available)/len(memory_available):.1f} GB")
         print(f"   • Peak Used: {max(memory_used):.1f} GB")
         print(f"   • Minimum Available: {min(memory_available):.1f} GB")
         
-        print(f"\n💾 Disk Usage:")
+        print(f"\n Disk Usage:")
         print(f"   • Average Free Space: {sum(disk_free)/len(disk_free):.1f} GB")
         print(f"   • Minimum Free Space: {min(disk_free):.1f} GB")
         
@@ -98,7 +98,7 @@ class StandaloneResourceMonitor:
         avg_cpu = sum(cpu_values) / len(cpu_values)
         avg_memory = sum(memory_used) / len(memory_used)
         
-        print(f"\n🔍 Performance Analysis:")
+        print(f"\n Performance Analysis:")
         if avg_cpu < 50:
             print(f"   • CPU: Low usage ({avg_cpu:.1f}%) - System can handle more parallel jobs")
         elif avg_cpu < 80:
@@ -120,7 +120,7 @@ class StandaloneResourceMonitor:
         else:
             recommended_parallel = min(system_cores // 2, 4)
         
-        print(f"\n💡 Recommendations for System Check Module:")
+        print(f"\n Recommendations for System Check Module:")
         print(f"   • Suggested max parallel ligands: {recommended_parallel}")
         print(f"   • Estimated memory per ligand: {avg_memory:.1f} GB (if running parallel)")
         print(f"   • System utilization: {'Good' if 50 <= avg_cpu <= 80 else 'Adjust needed'}")
@@ -129,7 +129,7 @@ class StandaloneResourceMonitor:
 
 
 if __name__ == "__main__":
-    print("🚀 Standalone Resource Monitor")
+    print(" Standalone Resource Monitor")
     print("This will monitor your system independently")
     print("Start this, then run docking in another terminal")
     print()

@@ -1,13 +1,74 @@
 {
-  "name": "frontend",
+  "name": "dippydock",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "DippyDock - Molecular Docking Desktop Application",
+  "main": "electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:electron": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "tsc -b && vite build",
+    "build:electron": "vite build && electron-builder",
+    "build:win": "vite build && electron-builder --win",
+    "build:mac": "vite build && electron-builder --mac",
+    "build:linux": "vite build && electron-builder --linux",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "electron ."
+  },
+  "build": {
+    "appId": "com.dippydock.app",
+    "productName": "DippyDock",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*.py",
+          "**/*.json",
+          "**/*.txt",
+          "!__pycache__/**",
+          "!*.pyc"
+        ]
+      },
+      {
+        "from": "../requirements.txt",
+        "to": "requirements.txt"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "public/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DippyDock"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "public/icon.png"
+    }
   },
   "dependencies": {
     "@react-three/drei": "^10.7.4",
@@ -17,6 +78,7 @@
     "ngl": "^2.4.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-router-dom": "^7.18.2",
     "tailwindcss": "^4.1.12",
     "three": "^0.180.0"
   },
@@ -26,12 +88,16 @@
     "@types/react-dom": "^19.1.7",
     "@types/three": "^0.179.0",
     "@vitejs/plugin-react-swc": "^4.0.0",
+    "concurrently": "^10.0.4",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.33.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2"
+    "vite": "^7.1.2",
+    "wait-on": "^9.1.0"
   }
 }

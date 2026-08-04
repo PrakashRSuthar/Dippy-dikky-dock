@@ -53,14 +53,14 @@ class CompleteFileTracker:
                 if file_path.exists():
                     file_path.unlink()
                     cleaned += 1
-                    print(f"🗑️  Removed: {file_path}")
+                    print(f"  Removed: {file_path}")
             except Exception as e:
                 print(f"Warning: Could not remove {file_path}: {e}")
         if self.workspace.exists():
             shutil.rmtree(self.workspace)
-            print(f"🗑️  Removed workspace: {self.workspace}")
+            print(f"  Removed workspace: {self.workspace}")
         if cleaned > 0:
-            print(f"🧹 Total cleaned: {cleaned} external files + workspace")
+            print(f" Total cleaned: {cleaned} external files + workspace")
     def get_total_size(self) -> float:
         total_size = 0
         for file_path in self.external_files:
@@ -98,7 +98,7 @@ class CleanDockingPipeline:
         for directory in [self.workspace, self.raw_dir, self.prepared_dir, self.docking_dir]:
             directory.mkdir(parents=True, exist_ok=True)
         self.file_tracker = CompleteFileTracker(self.workspace)
-        print(f"🚀 Docking Pipeline [{self.pipeline_id}]")
+        print(f" Docking Pipeline [{self.pipeline_id}]")
         print(f"   Workspace: {self.workspace}")
         self._cleanup_old_temp_runs()
 
@@ -111,12 +111,12 @@ class CleanDockingPipeline:
             if item.is_dir() and item.stat().st_mtime < cutoff:
                 shutil.rmtree(item, ignore_errors=True)
                 cleaned += 1
-        if cleaned: print(f"🧹 Cleaned {cleaned} old temp runs")
+        if cleaned: print(f" Cleaned {cleaned} old temp runs")
 
     def update_progress(self, percent: int, message: str):
         bar_length = 30
         filled_length = int(bar_length * percent // 100)
-        bar = '█' * filled_length + '░' * (bar_length - filled_length)
+        bar = '' * filled_length + '' * (bar_length - filled_length)
         print(f"\rProgress: |{bar}| {percent}% - {message}", end='', flush=True)
         progress_data = {"pipeline_id": self.pipeline_id,"percent": percent,"message": message,"timestamp": datetime.now().isoformat()}
         (self.workspace / "progress.json").write_text(json.dumps(progress_data))
@@ -124,12 +124,12 @@ class CleanDockingPipeline:
     def get_inputs(self, protein_input: str = None, ligand_input: str = None):
         if not protein_input:
             pdbs = [f for f in os.listdir('.') if f.lower().endswith('.pdb')]
-            if pdbs: print(f"\n📁 Available: {', '.join(pdbs[:3])}{'...' if len(pdbs)>3 else ''}")
-            protein_input = input("🧬 Enter protein: ").strip()
+            if pdbs: print(f"\n Available: {', '.join(pdbs[:3])}{'...' if len(pdbs)>3 else ''}")
+            protein_input = input(" Enter protein: ").strip()
         if not ligand_input:
             ligs = [f for f in os.listdir('.') if f.lower().endswith(('.sdf','.mol','.mol2','.pdbqt'))]
-            if ligs: print(f"📁 Available: {', '.join(ligs[:3])}{'...' if len(ligs)>3 else ''}")
-            ligand_input = input("💊 Enter ligand: ").strip()
+            if ligs: print(f" Available: {', '.join(ligs[:3])}{'...' if len(ligs)>3 else ''}")
+            ligand_input = input(" Enter ligand: ").strip()
         return protein_input, ligand_input
 
     def resolve_protein_input(self, protein_input: str) -> str:
@@ -152,7 +152,7 @@ class CleanDockingPipeline:
         return process_ligand(ligand_input, ligand_dir=str(self.raw_dir), prepared_dir=str(self.prepared_dir))
 
     def display_binding_sites(self, pocket_info: Dict):
-        print(f"\n\n🎯 TOP BINDING SITES")
+        print(f"\n\n TOP BINDING SITES")
         print("="*60)
         all_sites=[]
         if "primary" in pocket_info: all_sites.append(pocket_info["primary"])
@@ -175,7 +175,7 @@ class CleanDockingPipeline:
         if not xs: return None
         return (min(xs),max(xs)),(min(ys),max(ys)),(min(zs),max(zs))
 
-    def _clamp_box_to_protein(self, raw_protein_path: str, center: Dict) -> Dict:
+    def _clamp_box_to_protein(self, raw_protein_path: str, center: Dict, ligand_pdbqt: str = None) -> Dict:
         bounds = self._protein_bounds_ca(raw_protein_path)
         if not bounds: return center
         (xmin,xmax),(ymin,ymax),(zmin,zmax) = bounds
@@ -189,7 +189,9 @@ class CleanDockingPipeline:
         cx = clamp_center(cx, sx, xmin, xmax)
         cy = clamp_center(cy, sy, ymin, ymax)
         cz = clamp_center(cz, sz, zmin, zmax)
-        sx = max(14.0, min(26.0, sx)); sy = max(14.0, min(26.0, sy)); sz = max(14.0, min(26.0, sz))
+        from modules.pocket_identifier import _ligand_axis_max
+        box_max = _ligand_axis_max(ligand_pdbqt) if ligand_pdbqt else 26.0
+        sx = max(14.0, min(box_max, sx)); sy = max(14.0, min(box_max, sy)); sz = max(14.0, min(box_max, sz))
         center.update({"center_x":cx,"center_y":cy,"center_z":cz,"size_x":sx,"size_y":sy,"size_z":sz})
         return center
 
@@ -226,7 +228,7 @@ class CleanDockingPipeline:
             # Show and clamp box to protein bounds
             self.display_binding_sites(pocket_info)
             center = pocket_info["primary"]
-            center = self._clamp_box_to_protein(raw_protein_path, center)
+            center = self._clamp_box_to_protein(raw_protein_path, center, prepared_ligand_pdbqt)
 
             # Optional: probe alternate
             modes = pocket_info.get("modes", [])
@@ -257,8 +259,8 @@ class CleanDockingPipeline:
                 a1 = best_aff(q1); a2 = best_aff(q2)
                 if a2 is not None and (a1 is None or a2 < a1):
                     center = modes[1]
-                    center = self._clamp_box_to_protein(raw_protein_path, center)
-                    print(f"\n🔁 Switched to alternate pocket (quick better: {a2:.2f} < {a1 if a1 is not None else float('inf')})")
+                    center = self._clamp_box_to_protein(raw_protein_path, center, prepared_ligand_pdbqt)
+                    print(f"\n Switched to alternate pocket (quick better: {a2:.2f} < {a1 if a1 is not None else float('inf')})")
 
             # Docking
             self.update_progress(65, "Running molecular docking")
@@ -311,7 +313,7 @@ class CleanDockingPipeline:
             (self.workspace / "summary.json").write_text(json.dumps(summary_data, indent=2, default=str))
 
             self.update_progress(100, "Pipeline completed")
-            print(f"\n\n🎉 DOCKING COMPLETED!")
+            print(f"\n\n DOCKING COMPLETED!")
             print(f"   Best Affinity: {best_affinity:.2f} kcal/mol")
             print(f"   Total Poses: {total_poses}")
             print(f"   Duration: {total_time:.1f}s")
@@ -321,17 +323,17 @@ class CleanDockingPipeline:
 
         except Exception as e:
             total_time = time.time() - start_time
-            print(f"\n❌ Pipeline failed after {total_time:.1f}s: {str(e)}")
-            choice = input("\n🗑️  Delete all files? [Y/n]: ").strip().lower()
+            print(f"\n Pipeline failed after {total_time:.1f}s: {str(e)}")
+            choice = input("\n  Delete all files? [Y/n]: ").strip().lower()
             if choice != 'n':
                 self.file_tracker.cleanup_all_tracked_files()
-                print("🧹 All files cleaned up")
+                print(" All files cleaned up")
             return None
 
     # Data retention methods (unchanged)
     def handle_data_retention(self, summary_data: Dict) -> bool:
         print(f"\n\n" + "="*80)
-        print("💾 DATA MANAGEMENT - ALL FILES TRACKED")
+        print(" DATA MANAGEMENT - ALL FILES TRACKED")
         print("="*80)
         self.file_tracker.find_external_files_by_timestamp(self.run_timestamp)
         results = summary_data.get('results', {})
@@ -339,7 +341,7 @@ class CleanDockingPipeline:
         print(f"   • Total Poses: {results.get('total_poses', 'N/A')}")
         print(f"   • Duration: {summary_data['pipeline_info']['duration']}")
         total_size = self.file_tracker.get_total_size()
-        print(f"\n📁 ALL FILES TO BE MANAGED:")
+        print(f"\n ALL FILES TO BE MANAGED:")
         print(f"   • Workspace: {self.workspace}")
         print(f"   • External files found: {len(self.file_tracker.external_files)}")
         for ext_file in self.file_tracker.external_files:
@@ -347,19 +349,19 @@ class CleanDockingPipeline:
         print(f"   • Total size: {total_size:.2f} MB")
         while True:
             print(f"\nWhat would you like to do?")
-            print(f"1. 💾 Save Permanently (move everything to results)")
-            print(f"2. 🗑️  Delete Everything (remove ALL tracked files)")
+            print(f"1.  Save Permanently (move everything to results)")
+            print(f"2.   Delete Everything (remove ALL tracked files)")
             print(f"3. ⏳ Keep Temporarily (auto-delete in 7 days)")
             choice = input("\nChoose (1-3): ").strip()
             if choice == '1': return self._save_permanently(summary_data)
             elif choice == '2': return self._delete_everything()
             elif choice == '3': return self._keep_temporarily()
-            else: print("❌ Invalid choice. Please enter 1, 2, or 3.")
+            else: print(" Invalid choice. Please enter 1, 2, or 3.")
 
     def _save_permanently(self, summary_data: Dict) -> bool:
         try:
             default_name = f"docking_{summary_data['inputs']['protein']}_{summary_data['inputs']['ligand']}_{datetime.now().strftime('%Y%m%d')}"
-            project_name = input(f"\n📝 Project name [{default_name}]: ").strip() or default_name
+            project_name = input(f"\n Project name [{default_name}]: ").strip() or default_name
             permanent_path = Path(f"data/results/{project_name}")
             permanent_path.mkdir(parents=True, exist_ok=True)
             shutil.copytree(self.workspace, permanent_path / "workspace")
@@ -371,26 +373,26 @@ class CleanDockingPipeline:
             summary_data['pipeline_info']['permanent_location'] = str(permanent_path)
             (permanent_path / "summary.json").write_text(json.dumps(summary_data, indent=2, default=str))
             self.file_tracker.cleanup_all_tracked_files()
-            print(f"✅ Everything saved to: {permanent_path}")
+            print(f" Everything saved to: {permanent_path}")
             return True
         except Exception as e:
-            print(f"❌ Error saving: {e}")
+            print(f" Error saving: {e}")
             return False
 
     def _delete_everything(self) -> bool:
         try:
             total_size = self.file_tracker.get_total_size()
-            print(f"\n⚠️  This will permanently delete {total_size:.2f} MB")
+            print(f"\n  This will permanently delete {total_size:.2f} MB")
             confirm = input(f"\nType 'DELETE' to confirm: ").strip()
             if confirm == 'DELETE':
                 self.file_tracker.cleanup_all_tracked_files()
-                print(f"🗑️  Everything deleted ({total_size:.2f} MB freed)")
+                print(f"  Everything deleted ({total_size:.2f} MB freed)")
                 return True
             else:
-                print("❌ Deletion cancelled")
+                print(" Deletion cancelled")
                 return self._keep_temporarily()
         except Exception as e:
-            print(f"❌ Error deleting: {e}")
+            print(f" Error deleting: {e}")
             return False
 
     def _keep_temporarily(self) -> bool:
@@ -427,10 +429,10 @@ def main():
         )
         sys.exit(0 if result else 1)
     except KeyboardInterrupt:
-        print("\n❌ Cancelled by user")
+        print("\n Cancelled by user")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Fatal error: {str(e)}")
+        print(f" Fatal error: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":

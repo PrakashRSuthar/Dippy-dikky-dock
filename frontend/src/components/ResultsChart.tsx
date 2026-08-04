@@ -1,5 +1,4 @@
 // src/components/ResultsChart.tsx
-import React from 'react';
 
 interface Pose {
   pose: number;

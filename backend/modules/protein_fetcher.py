@@ -9,11 +9,14 @@ import webbrowser
 
 
 class ProteinFetcher:
-    def __init__(self, download_dir="downloads/proteins"):
+    def __init__(self, download_dir="downloads/proteins", open_files=False):
         self.download_dir = Path(download_dir)
         self.download_dir.mkdir(parents=True, exist_ok=True)
+        self.open_files = open_files
 
     def _open_file(self, path):
+        if not self.open_files:
+            return
         try:
             if platform.system() == "Windows":
                 os.startfile(path)
@@ -25,6 +28,8 @@ class ProteinFetcher:
             print(f"[WARNING] Couldn't open the file automatically: {e}")
 
     def _open_folder(self, path):
+        if not self.open_files:
+            return
         try:
             if platform.system() == "Windows":
                 os.startfile(path)
@@ -57,11 +62,11 @@ class ProteinFetcher:
             file_path = self.download_dir / filename
             with open(file_path, "w") as f:
                 f.write(response.text)
-            print(f"[INFO] ✅ Downloaded {pdb_id}.pdb from RCSB to {file_path}")
+            print(f"[INFO]  Downloaded {pdb_id}.pdb from RCSB to {file_path}")
             self._open_file(str(file_path))
             return str(file_path)
         else:
-            raise Exception(f"[ERROR] ❌ RCSB fetch failed for {pdb_id}. Status code: {response.status_code}")
+            raise Exception(f"[ERROR]  RCSB fetch failed for {pdb_id}. Status code: {response.status_code}")
 
     def fetch_from_alphafold(self, uniprot_id):
         uniprot_id = uniprot_id.upper()
@@ -73,15 +78,15 @@ class ProteinFetcher:
             file_path = self.download_dir / filename
             with open(file_path, "w") as f:
                 f.write(response.text)
-            print(f"[INFO] ✅ Downloaded AlphaFold model for {uniprot_id} to {file_path}")
+            print(f"[INFO]  Downloaded AlphaFold model for {uniprot_id} to {file_path}")
             self._open_file(str(file_path))
             return str(file_path)
         else:
-            raise Exception(f"[ERROR] ❌ AlphaFold fetch failed for {uniprot_id}. Status code: {response.status_code}")
+            raise Exception(f"[ERROR]  AlphaFold fetch failed for {uniprot_id}. Status code: {response.status_code}")
 
     def generate_from_sequence(self, sequence_placeholder=None): # Added placeholder to match call signature if needed elsewhere
         if not self.is_online():
-            print("⚠️ You are offline. Please connect to the internet to use AlphaFold2 Colab.")
+            print(" You are offline. Please connect to the internet to use AlphaFold2 Colab.")
             return None
 
         colab_url = "https://colab.research.google.com/drive/1gAaNunQVQQvbzyBdgj3VpnH7MAa6bA9K"
@@ -90,15 +95,15 @@ class ProteinFetcher:
         print("1. Go to the AlphaFold2 Colab notebook.")
         print("2. Paste your FASTA sequence into the appropriate field.")
         print("3. Run the notebook to generate the protein structure.")
-        print(f"\n🔗 Open Colab Notebook: {colab_url}")
+        print(f"\n Open Colab Notebook: {colab_url}")
 
         webbrowser.open(colab_url)
 
         filename_prefix = "generated_from_sequence"
-        print(f"\n💾 After generating and downloading your PDB, please save it as '{filename_prefix}_<timestamp>.pdb'")
-        print(f"📁 And place it manually in: {self.download_dir.resolve()}")
+        print(f"\n After generating and downloading your PDB, please save it as '{filename_prefix}_<timestamp>.pdb'")
+        print(f" And place it manually in: {self.download_dir.resolve()}")
 
-        input("\n🕐 Press Enter once you've saved the file manually in the download directory...")
+        input("\n Press Enter once you've saved the file manually in the download directory...")
 
         # You still need to check if the user actually placed a file,
         # but you don't know its exact name without the timestamp.
@@ -112,20 +117,20 @@ class ProteinFetcher:
         expected_path_example = self.download_dir / dummy_filename
 
         if any(f.name.startswith(f"{filename_prefix}_") and f.suffix == ".pdb" for f in self.download_dir.iterdir()):
-             print(f"✅ It seems a generated structure (e.g., '{filename_prefix}_*.pdb') is in {self.download_dir}")
+             print(f" It seems a generated structure (e.g., '{filename_prefix}_*.pdb') is in {self.download_dir}")
              # You might want to ask the user which file it is, or open the folder directly
              self._open_folder(str(self.download_dir.resolve()))
              return "Path to the manually saved file (needs user input or more advanced search)"
         else:
-            print("❌ No new generated file found matching the expected pattern. Please ensure it was saved correctly.")
+            print(" No new generated file found matching the expected pattern. Please ensure it was saved correctly.")
             self._open_folder(str(self.download_dir.resolve())) # Still open folder for user
             return None
 
 
 if __name__ == "__main__":
-    fetcher = ProteinFetcher()
+    fetcher = ProteinFetcher(open_files=True)
 
-    user_input = input("🔎 Enter PDB ID, UniProt ID, or FASTA sequence (or 'fasta' to generate from sequence): ").strip()
+    user_input = input(" Enter PDB ID, UniProt ID, or FASTA sequence (or 'fasta' to generate from sequence): ").strip()
 
     if len(user_input) == 4 and user_input.isalnum():
         try:
@@ -140,4 +145,4 @@ if __name__ == "__main__":
     elif user_input.lower() == 'fasta': # Changed condition to 'fasta' keyword
         fetcher.generate_from_sequence()
     else:
-        print("[ERROR] ❌ Invalid input. Please provide a valid 4-character PDB ID, UniProt ID, or type 'fasta' to generate from sequence.")
+        print("[ERROR]  Invalid input. Please provide a valid 4-character PDB ID, UniProt ID, or type 'fasta' to generate from sequence.")

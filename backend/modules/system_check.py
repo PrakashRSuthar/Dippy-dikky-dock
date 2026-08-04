@@ -39,18 +39,18 @@ class SimpleSystemChecker:
         
         specs = self.check_system_limits()
         
-        print("🖥️  SYSTEM CHECK")
+        print("  SYSTEM CHECK")
         print("="*40)
         print(f"CPU Cores: {specs['cpu_cores']}")
         print(f"Available Memory: {specs['memory_gb']} GB")
         print(f"Free Disk: {specs['disk_gb']} GB")
         print("="*40)
-        print(f"💊 MAX SAFE PARALLEL LIGANDS: {specs['max_parallel']}")
+        print(f" MAX SAFE PARALLEL LIGANDS: {specs['max_parallel']}")
         
         if specs['max_parallel'] > 1:
-            print("✅ Your PC can handle parallel processing")
+            print(" Your PC can handle parallel processing")
         else:
-            print("⚠️  Your PC should process one ligand at a time")
+            print("  Your PC should process one ligand at a time")
         
         print("="*40)
         
@@ -60,7 +60,7 @@ class SimpleSystemChecker:
 def get_system_max_limit():
     """Quick function to get max safe parallel limit"""
     
-    print("🔍 Checking your system capabilities...")
+    print(" Checking your system capabilities...")
     
     checker = SimpleSystemChecker()
     max_limit = checker.display_system_check()
@@ -85,7 +85,7 @@ def batch_setup_with_limit_check():
                 print("Please enter a positive number")
                 continue
             elif num_ligands > max_limit:
-                print(f"⚠️  Warning: {num_ligands} exceeds safe limit of {max_limit}")
+                print(f"  Warning: {num_ligands} exceeds safe limit of {max_limit}")
                 confirm = input("Continue anyway? This may slow down your PC [y/n]: ")
                 if confirm.lower() != 'y':
                     continue
@@ -94,11 +94,11 @@ def batch_setup_with_limit_check():
             if max_limit > 1 and num_ligands > 1:
                 batch_size = min(max_limit, num_ligands)
                 mode = "parallel"
-                print(f"✅ Will process {batch_size} ligands at once")
+                print(f" Will process {batch_size} ligands at once")
             else:
                 batch_size = 1
                 mode = "sequential"
-                print(f"✅ Will process 1 ligand at a time")
+                print(f" Will process 1 ligand at a time")
             
             return {
                 'num_ligands': num_ligands,
@@ -110,7 +110,7 @@ def batch_setup_with_limit_check():
         except ValueError:
             print("Please enter a valid number")
         except KeyboardInterrupt:
-            print("\n❌ Cancelled")
+            print("\n Cancelled")
             return None
 
 
@@ -118,7 +118,7 @@ if __name__ == "__main__":
     config = batch_setup_with_limit_check()
     
     if config:
-        print(f"\n🚀 Configuration:")
+        print(f"\n Configuration:")
         print(f"Ligands to test: {config['num_ligands']}")
         print(f"Batch size: {config['batch_size']}")
         print(f"Mode: {config['mode']}")

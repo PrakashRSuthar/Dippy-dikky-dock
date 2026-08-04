@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Temporary runs & benchmark data
+temp_runs/
+runs/
+outputs/
+downloads/
+
+# Docking run artifacts
+backend/data/prepared_proteins/
+backend/uploads/
+
+# Benchmark results (generated)
+benchmark_results/
+
+# Generated data & databases
+data/
+
+# Papers (source .tex lives in repo history / kept separately)
+paper/
+research paper/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Vite
+.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Test
+test_gen3d.sdf
+
+# Compiled benchmark paper
+compile_benchmark_paper.bat

@@ -11,6 +11,7 @@ interface DockingRequest {
     keep_solvents: boolean;
     keep_cofactors: boolean;
   };
+  retention?: 'permanent' | '7days' | 'delete' | 'save' | 'keep7d';
 }
 
 interface DockingResponse {

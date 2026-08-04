@@ -1,49 +1,76 @@
 // src/App.tsx
-import React, { useState } from 'react';
+import React from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Sidebar from './components/Sidebar';
 import { ProteinUpload } from './components/ProteinUpload';
 import { JobProgress } from './components/JobProgress';
 import { ResultsPage } from './pages/ResultsPage';
+import HistoryPage from './pages/HistoryPage';
+import SettingsPage from './pages/SettingsPage';
+import RunManagerPage from './pages/RunManagerPage';
 
-type AppState = 'upload' | 'progress' | 'results';
-
-function App() {
-  const [currentState, setCurrentState] = useState<AppState>('upload');
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+function DockPage() {
+  const [currentJobId, setCurrentJobId] = React.useState<string | null>(null);
+  const [showProgress, setShowProgress] = React.useState(false);
 
   const handleDockingStarted = (jobId: string) => {
     setCurrentJobId(jobId);
-    setCurrentState('progress');
+    setShowProgress(true);
   };
 
-  const handleJobComplete = (result: any) => {
-    if (result.status === 'completed') {
-      setCurrentState('results');
-    }
-  };
-
-  const handleBackToUpload = () => {
-    setCurrentJobId(null);
-    setCurrentState('upload');
-  };
-
-  if (currentState === 'progress' && currentJobId) {
+  if (showProgress && currentJobId) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <JobProgress 
-          jobId={currentJobId} 
-          onComplete={handleJobComplete}
-        />
-      </div>
+      <JobProgress
+        jobId={currentJobId}
+        onComplete={(r: { status: string }) => {
+          if (r.status === 'completed') {
+            window.location.href = `/results/${currentJobId}`;
+          }
+        }}
+      />
     );
   }
 
-  if (currentState === 'results' && currentJobId) {
-    return <ResultsPage jobId={currentJobId} onBack={handleBackToUpload} />;
-  }
+  return <ProteinUpload onDockingStarted={handleDockingStarted} />;
+}
 
+function App() {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <ProteinUpload onDockingStarted={handleDockingStarted} />
+    <BrowserRouter>
+      <div className="flex min-h-screen bg-gray-950">
+        <Sidebar />
+        <main className="flex-1 ml-16 lg:ml-60 transition-all duration-300">
+          <Routes>
+            <Route path="/" element={<DockPage />} />
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/runs" element={<RunManagerPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/results/:jobId" element={<ResultsPageWrapper />} />
+            <Route path="/progress/:jobId" element={<ProgressWrapper />} />
+          </Routes>
+        </main>
+      </div>
+    </BrowserRouter>
+  );
+}
+
+function ResultsPageWrapper() {
+  const jobId = window.location.pathname.split('/results/')[1];
+  return <ResultsPage jobId={jobId} onBack={() => window.location.href = '/history'} />;
+}
+
+function ProgressWrapper() {
+  const jobId = window.location.pathname.split('/progress/')[1];
+  return (
+    <div className="min-h-screen bg-gray-950 p-6">
+      <JobProgress
+        jobId={jobId}
+        onComplete={(r) => {
+          if (r.status === 'completed') {
+            window.location.href = `/results/${jobId}`;
+          }
+        }}
+      />
     </div>
   );
 }

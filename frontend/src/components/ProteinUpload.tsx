@@ -1,602 +1,543 @@
-// src/components/ProteinUpload.tsx
+// ProteinUpload.tsx
+// When multiple ligands: asks user "Run together (parallel)" or "Run as batch (sequential)"
+// Batch = one job per ligand queued one-by-one, each gets own job ID
+// Together = all submitted at once via /api/dock/batch
 import { useState } from 'react';
-import { Settings, Activity, Upload, Atom } from 'lucide-react';
+import { Settings, Activity, Upload, Atom, X, Layers, Zap } from 'lucide-react';
 import { useApiHealth } from '../hooks/useApiHealth';
 import { useFileUpload } from '../hooks/useFileUpload';
 import { useDocking } from '../hooks/useDocking';
 import { MoleculeVisualization } from './MoleculeVisualization';
 
 interface ProteinUploadProps {
-  onDockingStarted: (jobId: string) => void;
+  onDockingStarted: (jobId: string, allJobIds?: string[], batchId?: string) => void;
 }
 
+const apiBase = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
+
+function saveBatchState(batchId: string, jobIds: string[], labels: Record<string, string>) {
+  try {
+    const raw = localStorage.getItem('dock_batches') || '{}';
+    const map = JSON.parse(raw);
+    map[batchId] = jobIds;
+    localStorage.setItem('dock_batches', JSON.stringify(map));
+    const existing = JSON.parse(localStorage.getItem('dock_job_labels') || '{}');
+    localStorage.setItem('dock_job_labels', JSON.stringify({ ...existing, ...labels }));
+  } catch {}
+}
+
+// ── Run mode dialog ───────────────────────────────────────────────────────────
+interface RunModeDialogProps {
+  count: number;
+  onSelect: (mode: 'batch' | 'together') => void;
+  onCancel: () => void;
+}
+function RunModeDialog({ count, onSelect, onCancel }: RunModeDialogProps) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Run {count} ligands — choose mode</h2>
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5"/></button>
+        </div>
+        <p className="text-sm text-gray-500 mb-6">
+          You have <strong>{count} ligands</strong> selected against the same protein. How would you like to run them?
+        </p>
+        <div className="space-y-3">
+          <button
+            onClick={() => onSelect('batch')}
+            className="w-full flex items-start gap-4 p-4 border-2 border-gray-200 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-colors text-left group"
+          >
+            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0 group-hover:bg-blue-200">
+              <Layers className="w-5 h-5 text-blue-600"/>
+            </div>
+            <div>
+              <div className="font-medium text-gray-900">Run as batch (one by one)</div>
+              <div className="text-sm text-gray-500 mt-0.5">
+                Each ligand gets its own job ID. Jobs run sequentially — safe for low-RAM systems. Results have separate tabs.
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => onSelect('together')}
+            className="w-full flex items-start gap-4 p-4 border-2 border-gray-200 rounded-xl hover:border-green-500 hover:bg-green-50 transition-colors text-left group"
+          >
+            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center shrink-0 group-hover:bg-green-200">
+              <Zap className="w-5 h-5 text-green-600"/>
+            </div>
+            <div>
+              <div className="font-medium text-gray-900">Run together (parallel)</div>
+              <div className="text-sm text-gray-500 mt-0.5">
+                All ligands submitted at once. Faster on multi-core systems. Results appear in tabs as each completes.
+              </div>
+            </div>
+          </button>
+        </div>
+        <button onClick={onCancel} className="w-full mt-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
-  const [showSettings, setShowSettings] = useState(false);
-  
-  // Protein state
-  const [activeProteinTab, setActiveProteinTab] = useState<'database' | 'upload'>('database');
-  const [proteinId, setProteinId] = useState('1HSG'); // Pre-fill example
-  const [proteinInput, setProteinInput] = useState<string>('');
-  const [proteinSource, setProteinSource] = useState<'database' | 'upload' | null>(null);
-  
-  // Ligand state
-  const [activeLigandTab, setActiveLigandTab] = useState<'database' | 'upload'>('database');
-  const [ligandId, setLigandId] = useState('aspirin'); // Pre-fill example
-  const [ligandInput, setLigandInput] = useState<string>('');
-  const [ligandSource, setLigandSource] = useState<'database' | 'upload' | null>(null);
-  
-  // Retention policy state
-  const [retentionPolicy, setRetentionPolicy] = useState<'save' | 'delete' | 'keep7d'>('keep7d');
+  const [showSettings,      setShowSettings]      = useState(false);
+  const [showRunModeDialog, setShowRunModeDialog] = useState(false);
 
-  const { isHealthy, isChecking } = useApiHealth();
-  const { uploadFile, isUploading, uploadedFileName } = useFileUpload();
-  const { startDocking, isStarting } = useDocking();
+  // Protein
+  const [activeProteinTab, setActiveProteinTab] = useState<'database'|'upload'>('database');
+  const [proteinId,        setProteinId]        = useState('1HSG');
+  const [proteinInput,     setProteinInput]     = useState('');
+  const [proteinSource,    setProteinSource]    = useState<'database'|'upload'|null>(null);
 
-  // Protein handlers
-  const handleProteinFileUpload = async (file: File) => {
-    if (!isHealthy) {
-      alert('Backend not connected. Please start your FastAPI server.');
-      return;
-    }
+  // Ligands
+  const [activeLigandTab, setActiveLigandTab] = useState<'database'|'upload'>('database');
+  const [ligandId,        setLigandId]        = useState('aspirin');
+  const [ligandInput,     setLigandInput]     = useState('');   // currently previewed
+  const [_ligandSource,    _setLigandSource]    = useState<'database'|'upload'|null>(null);
+  const [ligandInputs,    setLigandInputs]    = useState<string[]>([]);
+  const [ligandFiles,     setLigandFiles]     = useState<{name:string;path:string}[]>([]);
+
+  // Retention
+  const [retentionPolicy, setRetentionPolicy] = useState<'save'|'delete'|'keep7d'>('keep7d');
+
+  // Submitting state
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { isHealthy, isChecking }                      = useApiHealth();
+  const { uploadFile, isUploading }                    = useFileUpload();
+  const { startDocking, isStarting }                   = useDocking();
+
+  // ── Cleaning policy ──────────────────────────────────────────────────────
+  const cleaningPolicy = { keep_waters:false, keep_ions:true, keep_solvents:false, keep_cofactors:true };
+
+  // ── Protein handlers ─────────────────────────────────────────────────────
+  const handleProteinUpload = async (file: File) => {
+    if (!isHealthy) { alert('Backend offline. Start the FastAPI server first.'); return; }
     const result = await uploadFile(file, 'protein');
-    if (result?.file_path) {
-      setProteinInput(result.file_path);
-      setProteinSource('upload');
-    }
-  };
-
-  const handleProteinFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleProteinFileUpload(file);
-  };
-
-  const handleProteinDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file && (file.name.endsWith('.pdb') || file.name.endsWith('.pdbqt'))) {
-      handleProteinFileUpload(file);
-    }
+    if (result?.file_path) { setProteinInput(result.file_path); setProteinSource('upload'); }
   };
 
   const handleProteinDatabase = () => {
-    if (proteinId.trim().length >= 4) {
-      setProteinInput(proteinId.trim());
-      setProteinSource('database');
-    }
+    if (proteinId.trim().length >= 4) { setProteinInput(proteinId.trim()); setProteinSource('database'); }
   };
 
-  // Ligand handlers  
-  const handleLigandFileUpload = async (file: File) => {
-    if (!isHealthy) {
-      alert('Backend not connected. Please start your FastAPI server.');
-      return;
-    }
-    const result = await uploadFile(file, 'ligand');
-    if (result?.file_path) {
-      setLigandInput(result.file_path);
-      setLigandSource('upload');
-    }
-  };
-
-  const handleLigandFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleLigandFileUpload(file);
-  };
-
-  const handleLigandDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file && (file.name.endsWith('.sdf') || file.name.endsWith('.mol') || file.name.endsWith('.mol2'))) {
-      handleLigandFileUpload(file);
-    }
+  // ── Ligand handlers ──────────────────────────────────────────────────────
+  const addLigandPaths = (paths: string[], names?: string[]) => {
+    setLigandInputs(prev => {
+      const seen = new Set(prev);
+      const added = paths.filter(p => !seen.has(p));
+      return [...prev, ...added];
+    });
+    setLigandFiles(prev => {
+      const seen = new Set(prev.map(f => f.path));
+      const added = paths.filter(p => !seen.has(p))
+        .map((p, i) => ({ path: p, name: names?.[i] || p.split('/').pop() || p }));
+      return [...prev, ...added];
+    });
+    setLigandInput(prev => prev || paths[0]);
+    _setLigandSource('database');
   };
 
   const handleLigandDatabase = () => {
-    if (ligandId.trim().length >= 2) {
-      setLigandInput(ligandId.trim());
-      setLigandSource('database');
+    const raw = ligandId.trim();
+    if (!raw) return;
+    const list = raw.split(',').map(s => s.trim()).filter(Boolean);
+    if (!list.length) return;
+    addLigandPaths(list, list);
+  };
+
+  const handleLigandFilesUpload = async (files: FileList | File[]) => {
+    if (!isHealthy) { alert('Backend offline.'); return; }
+    const accepted = Array.from(files).filter(f =>
+      ['.sdf','.mol','.mol2','.pdbqt'].some(ext => f.name.toLowerCase().endsWith(ext)));
+    if (!accepted.length) return;
+    const uploaded: {name:string;path:string}[] = [];
+    for (const file of accepted) {
+      const result = await uploadFile(file, 'ligand');
+      if (result?.file_path) uploaded.push({ name: file.name, path: result.file_path });
+    }
+    if (uploaded.length) {
+      addLigandPaths(uploaded.map(u => u.path), uploaded.map(u => u.name));
+      _setLigandSource('upload');
     }
   };
 
-  // Start Docking Process
-  const handleStartDocking = async () => {
-    if (!proteinInput || !ligandInput) return;
-    
-    const dockingRequest = {
-      protein_input: proteinInput,
-      ligand_input: ligandInput,
-      job_name: `${proteinInput}_${ligandInput}_${Date.now()}`,
-      cleaning_policy: {
-        keep_waters: false,
-        keep_ions: true,
-        keep_solvents: false,
-        keep_cofactors: true
-      },
-      retention: retentionPolicy  // Include retention policy
-    };
+  const removeLigand = (idx: number) => {
+    const removed = ligandInputs[idx];
+    const nextInputs = ligandInputs.filter((_,i) => i !== idx);
+    const nextFiles  = ligandFiles.filter((_,i) => i !== idx);
+    setLigandInputs(nextInputs);
+    setLigandFiles(nextFiles);
+    if (ligandInput === removed) setLigandInput(nextInputs[0] || '');
+  };
 
-    const jobId = await startDocking(dockingRequest);
-    if (jobId) {
-      onDockingStarted(jobId);
+  // ── Docking submission ───────────────────────────────────────────────────
+  const effectiveLigands = ligandInputs.length > 0 ? ligandInputs : (ligandInput ? [ligandInput] : []);
+
+  const handleStartDockingClick = () => {
+    if (!proteinInput || effectiveLigands.length === 0) return;
+    if (effectiveLigands.length > 1) {
+      setShowRunModeDialog(true);  // ask user
+    } else {
+      runSingle(effectiveLigands[0]);
     }
   };
 
-  const canProceed = proteinInput && ligandInput && isHealthy;
-  const isValidProteinId = proteinId.trim().length >= 4;
-  const isValidLigandId = ligandId.trim().length >= 2;
+  // Single job
+  const runSingle = async (ligand: string) => {
+    setIsSubmitting(true);
+    const jobId = await startDocking({
+      protein_input:   proteinInput,
+      ligand_input:    ligand,
+      job_name:        `${proteinInput}_${ligand}_${Date.now()}`,
+      cleaning_policy: cleaningPolicy,
+      retention:       retentionPolicy,
+    });
+    setIsSubmitting(false);
+    if (jobId) onDockingStarted(jobId, [jobId]);
+  };
 
+  // Together: all submitted at once to /api/dock/batch
+  const runTogether = async () => {
+    setShowRunModeDialog(false);
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        items: effectiveLigands.map((lig, i) => ({
+          protein_input: proteinInput,
+          ligand_input:  lig,
+          job_name:      ligandFiles[i]?.name || lig,
+        })),
+        cleaning_policy: cleaningPolicy,
+        retention:       retentionPolicy,
+      };
+      const res  = await fetch(`${apiBase}/api/dock/batch`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data   = await res.json();
+      const jobIds: string[] = (data.jobs || []).map((j: any) => j.job_id);
+      const labels: Record<string,string> = {};
+      (data.jobs || []).forEach((j: any, i: number) => {
+        labels[j.job_id] = ligandFiles[i]?.name || effectiveLigands[i] || j.job_id.slice(0,8);
+      });
+      saveBatchState(data.batch_id, jobIds, labels);
+      onDockingStarted(jobIds[0], jobIds, data.batch_id);
+    } catch (e) {
+      console.error(e); alert('Failed to start parallel docking: ' + e);
+    }
+    setIsSubmitting(false);
+  };
+
+  // Batch: one by one sequentially — submit all, track all job IDs
+  const runBatch = async () => {
+    setShowRunModeDialog(false);
+    setIsSubmitting(true);
+    const batchId = crypto.randomUUID();
+    const jobIds:  string[] = [];
+    const labels:  Record<string,string> = {};
+    try {
+      for (let i = 0; i < effectiveLigands.length; i++) {
+        const lig   = effectiveLigands[i];
+        const label = ligandFiles[i]?.name || lig;
+        const res   = await fetch(`${apiBase}/api/dock`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            protein_input:   proteinInput,
+            ligand_input:    lig,
+            job_name:        label,
+            cleaning_policy: cleaningPolicy,
+            retention:       retentionPolicy,
+          }),
+        });
+        if (!res.ok) { console.error(`Job ${i} failed to start`); continue; }
+        const data = await res.json();
+        if (data.job_id) { jobIds.push(data.job_id); labels[data.job_id] = label; }
+      }
+      if (!jobIds.length) { alert('No jobs started.'); setIsSubmitting(false); return; }
+      saveBatchState(batchId, jobIds, labels);
+      onDockingStarted(jobIds[0], jobIds, batchId);
+    } catch (e) {
+      console.error(e); alert('Batch submission error: ' + e);
+    }
+    setIsSubmitting(false);
+  };
+
+  const canProceed    = Boolean(proteinInput) && effectiveLigands.length > 0 && isHealthy;
+  const isValidProtId = proteinId.trim().length >= 4;
+  const busy          = isSubmitting || isStarting || isUploading;
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="max-w-full mx-auto p-4 lg:p-6">
+
+      {/* Run mode dialog */}
+      {showRunModeDialog && (
+        <RunModeDialog
+          count={effectiveLigands.length}
+          onSelect={mode => mode === 'batch' ? runBatch() : runTogether()}
+          onCancel={() => setShowRunModeDialog(false)}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-            <Activity className="w-6 h-6 text-white" />
+            <Activity className="w-6 h-6 text-white"/>
           </div>
           <div>
             <h1 className="text-2xl font-bold">MolecularDock Pro</h1>
             <p className="text-sm text-gray-600">Professional Molecular Docking Platform</p>
           </div>
-          <div className="flex items-center space-x-2 ml-4">
-            <div className={`w-3 h-3 rounded-full ${
-              isChecking ? 'bg-yellow-400 animate-pulse' : isHealthy ? 'bg-green-400' : 'bg-red-400'
-            }`} />
-            <span className="text-xs text-gray-600">
-              {isChecking ? 'Checking...' : isHealthy ? 'System OK' : 'Backend Offline'}
-            </span>
+          <div className="flex items-center gap-2 ml-4">
+            <div className={`w-3 h-3 rounded-full ${isChecking?'bg-yellow-400 animate-pulse':isHealthy?'bg-green-400':'bg-red-400'}`}/>
+            <span className="text-xs text-gray-600">{isChecking?'Checking…':isHealthy?'System OK':'Backend Offline'}</span>
           </div>
         </div>
-        <button
-          onClick={() => setShowSettings(true)}
-          className="flex items-center space-x-2 px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-        >
-          <Settings className="w-4 h-4" />
-          <span>Settings</span>
+        <button onClick={() => setShowSettings(true)} className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+          <Settings className="w-4 h-4"/><span>Settings</span>
         </button>
       </div>
 
-      {/* Backend Status */}
       {!isHealthy && (
         <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <div className="flex items-center space-x-2">
-            <span className="text-yellow-600">ℹ️</span>
-            <div>
-              <h3 className="text-yellow-800 font-medium">Backend Required for Docking</h3>
-              <p className="text-yellow-700 text-sm">
-                Start backend: <code className="bg-yellow-100 px-1 rounded">python api/docking_api.py</code>
-              </p>
-            </div>
-          </div>
+          <p className="text-yellow-800 font-medium text-sm">Backend required for docking</p>
+          <p className="text-yellow-700 text-sm mt-1">
+            Run: <code className="bg-yellow-100 px-1 rounded">python api/docking_api.py</code>
+          </p>
         </div>
       )}
 
-      {/* Main Content - Full Width Layout */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        
-        {/* Left Column: Protein Section */}
+
+        {/* ── Protein column ─────────────────────────────────────────────── */}
         <div className="space-y-6">
-          {/* Protein Upload - More Compact */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold flex items-center space-x-2">
-                <span>🧬</span>
-                <span>Protein Structure</span>
-                {proteinInput && <span className="text-green-600">✅</span>}
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                🧬 Protein Structure {proteinInput && <span className="text-green-600">✅</span>}
               </h2>
-              <p className="text-sm text-gray-600 mt-1">Upload or fetch from database</p>
+              <p className="text-sm text-gray-500 mt-0.5">Upload or fetch from database</p>
             </div>
 
             <div className="flex border-b">
-              <button
-                onClick={() => setActiveProteinTab('database')}
-                className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 ${
-                  activeProteinTab === 'database'
-                    ? 'text-blue-600 border-blue-600 bg-blue-50'
-                    : 'text-gray-600 border-transparent'
-                }`}
-              >
-                Database
-              </button>
-              <button
-                onClick={() => setActiveProteinTab('upload')}
-                className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 ${
-                  activeProteinTab === 'upload'
-                    ? 'text-blue-600 border-blue-600 bg-blue-50'
-                    : 'text-gray-600 border-transparent'
-                }`}
-              >
-                Upload
-              </button>
+              {(['database','upload'] as const).map(tab => (
+                <button key={tab} onClick={() => setActiveProteinTab(tab)}
+                  className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 capitalize ${
+                    activeProteinTab===tab ? 'text-blue-600 border-blue-600 bg-blue-50' : 'text-gray-600 border-transparent'}`}>
+                  {tab}
+                </button>
+              ))}
             </div>
 
             <div className="p-4">
-              {activeProteinTab === 'database' && (
+              {activeProteinTab === 'database' ? (
                 <div className="space-y-3">
-                  <input
-                    type="text"
-                    value={proteinId}
-                    onChange={(e) => setProteinId(e.target.value.toUpperCase())}
-                    placeholder="1HSG or P12345"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-center font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <div className="text-xs text-gray-500 text-center">PDB ID or UniProt ID</div>
-                  <button
-                    onClick={handleProteinDatabase}
-                    disabled={!isValidProteinId}
-                    className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
-                      isValidProteinId
-                        ? 'bg-blue-600 text-white hover:bg-blue-700'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    }`}
-                  >
+                  <input type="text" value={proteinId} onChange={e => setProteinId(e.target.value.toUpperCase())}
+                    placeholder="1HSG or P12345" onKeyDown={e => e.key==='Enter' && handleProteinDatabase()}
+                    className="w-full px-3 py-2 border rounded-md text-center font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"/>
+                  <p className="text-xs text-gray-500 text-center">PDB ID or UniProt ID</p>
+                  <button onClick={handleProteinDatabase} disabled={!isValidProtId}
+                    className={`w-full py-2 rounded-md font-medium ${isValidProtId?'bg-blue-600 text-white hover:bg-blue-700':'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
                     Use Protein ID
                   </button>
                 </div>
-              )}
-
-              {activeProteinTab === 'upload' && (
-                <div>
-                  <div
-                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
-                      isHealthy 
-                        ? 'border-gray-300 hover:border-gray-400' 
-                        : 'border-gray-200 bg-gray-50'
-                    }`}
-                    onDrop={handleProteinDrop}
-                    onDragOver={(e) => e.preventDefault()}
-                  >
-                    <Upload className={`w-6 h-6 mx-auto mb-2 ${isHealthy ? 'text-gray-400' : 'text-gray-300'}`} />
-                    <p className="text-sm text-gray-600 mb-2">Drop PDB/PDBQT files here</p>
-                    <input
-                      type="file"
-                      accept=".pdb,.pdbqt"
-                      onChange={handleProteinFileSelect}
-                      className="hidden"
-                      id="protein-file"
-                      disabled={!isHealthy}
-                    />
-                    <label
-                      htmlFor="protein-file"
-                      className={`inline-flex items-center px-3 py-1 border border-gray-300 rounded-md bg-white text-sm ${
-                        isHealthy ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-50'
-                      }`}
-                    >
-                      Browse Files
-                    </label>
-                    {isUploading && <div className="mt-2 text-xs text-blue-600">Uploading...</div>}
-                    {!isHealthy && <div className="mt-2 text-xs text-red-600">Backend required for uploads</div>}
-                  </div>
+              ) : (
+                <div onDrop={e => { e.preventDefault(); const f=e.dataTransfer.files[0]; if(f) handleProteinUpload(f); }}
+                  onDragOver={e => e.preventDefault()}
+                  className="border-2 border-dashed rounded-xl p-6 text-center hover:border-blue-400 transition-colors">
+                  <Upload className="w-6 h-6 mx-auto mb-2 text-gray-400"/>
+                  <p className="text-sm text-gray-500 mb-2">Drop PDB / PDBQT here</p>
+                  <input type="file" accept=".pdb,.pdbqt" className="hidden" id="prot-file"
+                    onChange={e => { const f=e.target.files?.[0]; if(f) handleProteinUpload(f); }}/>
+                  <label htmlFor="prot-file" className="cursor-pointer text-xs border border-gray-300 rounded px-3 py-1 hover:bg-gray-50">Browse</label>
                 </div>
               )}
-
               {proteinInput && (
-                <div className="mt-4 p-3 bg-green-50 rounded-lg">
-                  <div className="text-sm text-green-800 flex items-center space-x-2">
-                    <span>✅</span>
-                    <span>Ready: {proteinSource === 'upload' ? uploadedFileName : proteinInput}</span>
-                  </div>
+                <div className="mt-3 p-2 bg-green-50 rounded-lg text-sm text-green-800 flex items-center gap-2">
+                  <span>✅</span>
+                  <span className="truncate">{proteinSource==='upload' ? proteinInput.split('/').pop() : proteinInput}</span>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Protein Visualization - EXPANDED */}
+          {/* Protein preview */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-6 py-4 border-b">
-              <h3 className="text-lg font-semibold flex items-center space-x-2">
-                <span>🔬</span>
-                <span>Protein Preview</span>
-              </h3>
-              <p className="text-sm text-gray-600">3D structure visualization</p>
+              <h3 className="text-lg font-semibold">🔬 Protein Preview</h3>
             </div>
             <div className="p-4">
-              {/* EXPANDED HEIGHT - Better fit for protein structures */}
-              <div className="h-96 md:h-[500px] lg:h-[600px] border border-gray-200 rounded-lg bg-gray-50">
-                <MoleculeVisualization 
-                  moleculePath={proteinInput}
-                  moleculeType="protein"
-                  color="#3b82f6"
-                  height="100%"
-                />
+              <div className="h-80 border border-gray-200 rounded-lg bg-gray-50">
+                <MoleculeVisualization moleculePath={proteinInput||null} moleculeType="protein" height="100%"/>
               </div>
-              
-              {/* Protein Info Panel */}
-              {proteinInput && (
-                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                  <div className="bg-blue-50 p-3 rounded-lg">
-                    <div className="font-medium text-blue-800">Source</div>
-                    <div className="text-blue-700">
-                      {proteinSource === 'database' ? 'RCSB PDB Database' : 'Uploaded File'}
-                    </div>
-                  </div>
-                  <div className="bg-blue-50 p-3 rounded-lg">
-                    <div className="font-medium text-blue-800">Structure ID</div>
-                    <div className="text-blue-700 font-mono">
-                      {proteinSource === 'upload' ? uploadedFileName : proteinInput}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
 
-        {/* Right Column: Ligand Section */}
+        {/* ── Ligand column ──────────────────────────────────────────────── */}
         <div className="space-y-6">
-          {/* Ligand Upload - More Compact */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold flex items-center space-x-2">
-                <span>💊</span>
-                <span>Ligand Structure</span>
-                {ligandInput && <span className="text-green-600">✅</span>}
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                💊 Ligand{effectiveLigands.length > 1 ? 's' : ''}
+                {effectiveLigands.length > 1 && (
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-normal">
+                    {effectiveLigands.length} selected
+                  </span>
+                )}
+                {effectiveLigands.length > 0 && <span className="text-green-600">✅</span>}
               </h2>
-              <p className="text-sm text-gray-600 mt-1">Upload or fetch from PubChem</p>
+              <p className="text-sm text-gray-500 mt-0.5">Upload files or fetch from PubChem</p>
             </div>
 
             <div className="flex border-b">
-              <button
-                onClick={() => setActiveLigandTab('database')}
-                className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 ${
-                  activeLigandTab === 'database'
-                    ? 'text-green-600 border-green-600 bg-green-50'
-                    : 'text-gray-600 border-transparent'
-                }`}
-              >
-                PubChem
-              </button>
-              <button
-                onClick={() => setActiveLigandTab('upload')}
-                className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 ${
-                  activeLigandTab === 'upload'
-                    ? 'text-green-600 border-green-600 bg-green-50'
-                    : 'text-gray-600 border-transparent'
-                }`}
-              >
-                Upload
-              </button>
+              {(['database','upload'] as const).map(tab => (
+                <button key={tab} onClick={() => setActiveLigandTab(tab)}
+                  className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 capitalize ${
+                    activeLigandTab===tab ? 'text-green-600 border-green-600 bg-green-50' : 'text-gray-600 border-transparent'}`}>
+                  {tab==='database' ? 'PubChem' : 'Upload'}
+                </button>
+              ))}
             </div>
 
             <div className="p-4">
-              {activeLigandTab === 'database' && (
+              {activeLigandTab === 'database' ? (
                 <div className="space-y-3">
-                  <input
-                    type="text"
-                    value={ligandId}
-                    onChange={(e) => setLigandId(e.target.value)}
-                    placeholder="aspirin or 2244"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-center font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
-                  />
-                  <div className="text-xs text-gray-500 text-center">Compound name or CID</div>
-                  <button
-                    onClick={handleLigandDatabase}
-                    disabled={!isValidLigandId}
-                    className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
-                      isValidLigandId
-                        ? 'bg-green-600 text-white hover:bg-green-700'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    }`}
-                  >
-                    Use Ligand ID
+                  <input type="text" value={ligandId} onChange={e => setLigandId(e.target.value)}
+                    onKeyDown={e => e.key==='Enter' && handleLigandDatabase()}
+                    placeholder="aspirin, ibuprofen, 2244 — comma-separated for multiple"
+                    className="w-full px-3 py-2 border rounded-md text-center font-mono focus:ring-2 focus:ring-green-500 focus:outline-none text-sm"/>
+                  <p className="text-xs text-gray-500 text-center">Compound name or PubChem CID · use commas for multiple</p>
+                  <button onClick={handleLigandDatabase} disabled={ligandId.trim().length < 2}
+                    className={`w-full py-2 rounded-md font-medium ${ligandId.trim().length>=2?'bg-green-600 text-white hover:bg-green-700':'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+                    Add Ligand{ligandId.includes(',') ? 's' : ''}
                   </button>
                 </div>
-              )}
-
-              {activeLigandTab === 'upload' && (
-                <div>
-                  <div
-                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
-                      isHealthy 
-                        ? 'border-gray-300 hover:border-gray-400' 
-                        : 'border-gray-200 bg-gray-50'
-                    }`}
-                    onDrop={handleLigandDrop}
-                    onDragOver={(e) => e.preventDefault()}
-                  >
-                    <Atom className={`w-6 h-6 mx-auto mb-2 ${isHealthy ? 'text-gray-400' : 'text-gray-300'}`} />
-                    <p className="text-sm text-gray-600 mb-2">Drop SDF/MOL/MOL2 files here</p>
-                    <input
-                      type="file"
-                      accept=".sdf,.mol,.mol2"
-                      onChange={handleLigandFileSelect}
-                      className="hidden"
-                      id="ligand-file"
-                      disabled={!isHealthy}
-                    />
-                    <label
-                      htmlFor="ligand-file"
-                      className={`inline-flex items-center px-3 py-1 border border-gray-300 rounded-md bg-white text-sm ${
-                        isHealthy ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-50'
-                      }`}
-                    >
-                      Browse Files
-                    </label>
-                    {!isHealthy && <div className="mt-2 text-xs text-red-600">Backend required for uploads</div>}
-                  </div>
+              ) : (
+                <div onDrop={e => { e.preventDefault(); handleLigandFilesUpload(e.dataTransfer.files); }}
+                  onDragOver={e => e.preventDefault()}
+                  className="border-2 border-dashed rounded-xl p-6 text-center hover:border-green-400 transition-colors">
+                  <Atom className="w-6 h-6 mx-auto mb-2 text-gray-400"/>
+                  <p className="text-sm text-gray-500 mb-2">Drop SDF / MOL / MOL2 / PDBQT here</p>
+                  <input type="file" accept=".sdf,.mol,.mol2,.pdbqt" multiple className="hidden" id="lig-file"
+                    onChange={e => { if(e.target.files) handleLigandFilesUpload(e.target.files); }}/>
+                  <label htmlFor="lig-file" className="cursor-pointer text-xs border border-gray-300 rounded px-3 py-1 hover:bg-gray-50">Browse</label>
+                  {isUploading && <p className="mt-2 text-xs text-blue-600">Uploading…</p>}
                 </div>
               )}
 
-              {ligandInput && (
-                <div className="mt-4 p-3 bg-green-50 rounded-lg">
-                  <div className="text-sm text-green-800 flex items-center space-x-2">
-                    <span>✅</span>
-                    <span>Ready: {ligandSource === 'upload' ? uploadedFileName : ligandInput}</span>
+              {/* Ligand list with remove */}
+              {ligandFiles.length > 0 && (
+                <div className="mt-4 space-y-1">
+                  <p className="text-xs font-medium text-gray-600 mb-2">{ligandFiles.length} ligand{ligandFiles.length>1?'s':''} queued:</p>
+                  <div className="max-h-40 overflow-y-auto space-y-1">
+                    {ligandFiles.map((f, idx) => (
+                      <div key={`${f.path}-${idx}`}
+                        onClick={() => setLigandInput(f.path)}
+                        className={`flex items-center justify-between px-3 py-2 rounded-lg border cursor-pointer text-sm transition-colors ${
+                          ligandInput===f.path ? 'bg-green-50 border-green-300 text-green-800' : 'bg-gray-50 border-gray-200 hover:bg-gray-100'}`}>
+                        <span className="truncate mr-2">{f.name}</span>
+                        <button onClick={e => { e.stopPropagation(); removeLigand(idx); }}
+                          className="text-gray-400 hover:text-red-500 shrink-0">
+                          <X className="w-4 h-4"/>
+                        </button>
+                      </div>
+                    ))}
                   </div>
+                  <p className="text-xs text-gray-400 mt-1">Click a ligand to preview it below</p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Ligand Visualization - EXPANDED */}
+          {/* Ligand preview */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-6 py-4 border-b">
-              <h3 className="text-lg font-semibold flex items-center space-x-2">
-                <span>⚗️</span>
-                <span>Ligand Preview</span>
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                ⚗️ Ligand Preview
+                {ligandInput && <span className="text-sm font-normal text-gray-500">— {ligandFiles.find(f=>f.path===ligandInput)?.name || ligandInput}</span>}
               </h3>
-              <p className="text-sm text-gray-600">Chemical structure visualization</p>
             </div>
             <div className="p-4">
-              {/* EXPANDED HEIGHT - Better fit for ligand structures */}
-              <div className="h-96 md:h-[500px] lg:h-[600px] border border-gray-200 rounded-lg bg-gray-50">
-                <MoleculeVisualization 
-                  moleculePath={ligandInput}
+              <div className="h-80 border border-gray-200 rounded-lg bg-gray-50">
+                <MoleculeVisualization
                   moleculeType="ligand"
-                  color="#10b981"
+                  moleculePath={ligandInput || null}
                   height="100%"
+                  ligandList={ligandFiles}
+                  onLigandChange={path => setLigandInput(path)}
                 />
               </div>
-
-              {/* Ligand Info Panel */}
-              {ligandInput && (
-                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                  <div className="bg-green-50 p-3 rounded-lg">
-                    <div className="font-medium text-green-800">Source</div>
-                    <div className="text-green-700">
-                      {ligandSource === 'database' ? 'PubChem Database' : 'Uploaded File'}
-                    </div>
-                  </div>
-                  <div className="bg-green-50 p-3 rounded-lg">
-                    <div className="font-medium text-green-800">Compound</div>
-                    <div className="text-green-700 font-mono">
-                      {ligandSource === 'upload' ? uploadedFileName : ligandInput}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Data Retention Policy Selection */}
+      {/* ── Retention policy ──────────────────────────────────────────────── */}
       {canProceed && (
         <div className="mt-8 bg-white rounded-xl border shadow-sm p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center space-x-2">
-            <span>💾</span>
-            <span>Data Retention Policy</span>
-          </h3>
-          <p className="text-sm text-gray-600 mb-4">
-            Choose what to do with generated files after docking completes:
-          </p>
-          
+          <h3 className="text-lg font-semibold mb-4">💾 Data Retention</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <label className="flex items-start space-x-3 cursor-pointer p-4 border-2 rounded-lg transition-colors hover:bg-gray-50">
-              <input
-                type="radio"
-                name="retention"
-                value="save"
-                checked={retentionPolicy === 'save'}
-                onChange={(e) => setRetentionPolicy(e.target.value as any)}
-                className="mt-1"
-              />
-              <div>
-                <div className="font-medium flex items-center space-x-2">
-                  <span>💾</span>
-                  <span>Save Permanently</span>
+            {[
+              { value:'save',   icon:'💾', label:'Save permanently', desc:'Move to data/results/ after completion' },
+              { value:'keep7d', icon:'⏳', label:'Keep temporarily',  desc:'Auto-delete after 7 days' },
+              { value:'delete', icon:'🗑️', label:'Delete immediately',desc:'Remove files once results are shown' },
+            ].map(opt => (
+              <label key={opt.value} className={`flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer transition-colors ${
+                retentionPolicy===opt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                <input type="radio" name="retention" value={opt.value} checked={retentionPolicy===opt.value}
+                  onChange={e => setRetentionPolicy(e.target.value as any)} className="mt-1"/>
+                <div>
+                  <div className="font-medium flex items-center gap-2"><span>{opt.icon}</span>{opt.label}</div>
+                  <p className="text-sm text-gray-500 mt-0.5">{opt.desc}</p>
                 </div>
-                <div className="text-sm text-gray-600 mt-1">
-                  Move all files to permanent storage in data/results/
-                </div>
-              </div>
-            </label>
-            
-            <label className="flex items-start space-x-3 cursor-pointer p-4 border-2 rounded-lg transition-colors hover:bg-gray-50">
-              <input
-                type="radio"
-                name="retention"
-                value="keep7d"
-                checked={retentionPolicy === 'keep7d'}
-                onChange={(e) => setRetentionPolicy(e.target.value as any)}
-                className="mt-1"
-              />
-              <div>
-                <div className="font-medium flex items-center space-x-2">
-                  <span>⏳</span>
-                  <span>Keep Temporarily</span>
-                </div>
-                <div className="text-sm text-gray-600 mt-1">
-                  Keep files in temp directory, auto-delete after 7 days
-                </div>
-              </div>
-            </label>
-            
-            <label className="flex items-start space-x-3 cursor-pointer p-4 border-2 rounded-lg transition-colors hover:bg-gray-50">
-              <input
-                type="radio"
-                name="retention"
-                value="delete"
-                checked={retentionPolicy === 'delete'}
-                onChange={(e) => setRetentionPolicy(e.target.value as any)}
-                className="mt-1"
-              />
-              <div>
-                <div className="font-medium flex items-center space-x-2">
-                  <span>🗑️</span>
-                  <span>Delete Immediately</span>
-                </div>
-                <div className="text-sm text-gray-600 mt-1">
-                  Remove all generated files after results are processed
-                </div>
-              </div>
-            </label>
+              </label>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Start Docking Button */}
+      {/* ── Start button ──────────────────────────────────────────────────── */}
       {canProceed && (
-        <div className="mt-8 flex justify-center">
-          <button
-            onClick={handleStartDocking}
-            disabled={!canProceed || isStarting}
-            className={`px-8 py-4 rounded-lg font-semibold text-lg transition-colors flex items-center space-x-3 ${
-              canProceed && !isStarting
-                ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
-                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-            }`}
-          >
-            {isStarting ? (
+        <div className="mt-8 flex flex-col items-center gap-3">
+          {effectiveLigands.length > 1 && (
+            <p className="text-sm text-gray-500">
+              {effectiveLigands.length} ligands selected · you'll choose batch or parallel after clicking
+            </p>
+          )}
+          <button onClick={handleStartDockingClick} disabled={!canProceed || busy}
+            className={`px-10 py-4 rounded-xl font-semibold text-lg transition-colors flex items-center gap-3 shadow-lg ${
+              canProceed && !busy ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
+            {busy ? (
               <>
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                <span>Starting Docking...</span>
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                Starting…
               </>
             ) : (
-              <>
-                <span>⚡</span>
-                <span>Start Molecular Docking</span>
-              </>
+              <><span>⚡</span>Start Molecular Docking</>
             )}
           </button>
         </div>
       )}
 
-      {/* Settings Modal */}
+      {/* ── Settings modal ─────────────────────────────────────────────────── */}
       {showSettings && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-96 shadow-2xl">
             <h3 className="text-lg font-semibold mb-4">Settings</h3>
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-1">API Base URL</label>
-              <input
-                type="url"
-                defaultValue={import.meta.env.VITE_API_BASE || 'http://localhost:8000'}
-                className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex space-x-3">
-              <button
-                onClick={() => setShowSettings(false)}
-                className="flex-1 px-4 py-2 border rounded-md hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => setShowSettings(false)}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                Save
-              </button>
+            <label className="block text-sm font-medium mb-1">API Base URL</label>
+            <input type="url" defaultValue={apiBase} className="w-full px-3 py-2 border rounded-md mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+            <div className="flex gap-3">
+              <button onClick={() => setShowSettings(false)} className="flex-1 py-2 border rounded-md hover:bg-gray-50">Cancel</button>
+              <button onClick={() => setShowSettings(false)} className="flex-1 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Save</button>
             </div>
           </div>
         </div>
@@ -604,3 +545,4 @@ export const ProteinUpload = ({ onDockingStarted }: ProteinUploadProps) => {
     </div>
   );
 };
+export default ProteinUpload;

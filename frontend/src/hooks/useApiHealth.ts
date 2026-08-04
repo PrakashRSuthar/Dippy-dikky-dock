@@ -14,7 +14,7 @@ export const useApiHealth = () => {
   const checkHealth = async () => {
     try {
       setIsChecking(true);
-      const response = await fetch(`${import.meta.env.VITE_API_BASE}/`);
+      const response = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
