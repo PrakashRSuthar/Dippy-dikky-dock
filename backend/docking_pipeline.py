@@ -12,6 +12,14 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional, List
 
+# Force UTF-8 output: Windows defaults stdout to cp1252 ("charmap"), which cannot
+# encode the emoji/box-drawing characters used in logs and crashes the pipeline.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from modules.protein_fetcher import ProteinFetcher
 from modules.ligand_preparer import process_ligand, _convert_to_pdbqt
 from modules.pocket_identifier import identify_binding_site, get_pocket_analysis_config

@@ -15,6 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+# Force UTF-8 output: Windows defaults stdout to cp1252 ("charmap"), which cannot
+# encode the emoji/box-drawing characters used in logs and crashes the pipeline.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 backend_dir = Path(__file__).parent.parent
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(backend_dir))

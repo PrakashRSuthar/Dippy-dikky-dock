@@ -31,6 +31,8 @@ function startBackend() {
       PYTHONPATH: isDev
         ? path.join(__dirname, '..', '..', 'backend')
         : path.join(process.resourcesPath, 'backend'),
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
     },
   });
 
