@@ -7,14 +7,18 @@ const isDev = !app.isPackaged;
 let mainWindow;
 let backendProcess;
 
+function getPythonPath() {
+  if (isDev) return 'python';
+  const bundled = path.join(process.resourcesPath, 'python', 'python.exe');
+  return require('fs').existsSync(bundled) ? bundled : 'python';
+}
+
 function startBackend() {
   const backendPath = isDev
     ? path.join(__dirname, '..', '..', 'backend', 'main.py')
     : path.join(process.resourcesPath, 'backend', 'main.py');
 
-  const pythonPath = isDev
-    ? 'python'
-    : path.join(process.resourcesPath, 'python', 'python.exe');
+  const pythonPath = getPythonPath();
 
   console.log('Starting backend:', pythonPath, backendPath);
 
@@ -49,7 +53,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'DippyDock',
+    title: 'MoleDock',
     icon: path.join(__dirname, '..', 'public', 'icon.png'),
     webPreferences: {
       nodeIntegration: false,
@@ -61,7 +65,6 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }

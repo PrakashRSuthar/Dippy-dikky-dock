@@ -1,13 +1,13 @@
 {
-  "name": "dippydock",
+  "name": "mole-dock",
   "private": true,
   "version": "1.0.0",
-  "description": "DippyDock - Molecular Docking Desktop Application",
-  "main": "electron/main.js",
+  "description": "MoleDock - Molecular Docking Desktop Application",
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:electron": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:electron": "concurrently --kill-others \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "tsc -b && vite build",
     "build:electron": "vite build && electron-builder",
     "build:win": "vite build && electron-builder --win",
@@ -18,8 +18,8 @@
     "start": "electron ."
   },
   "build": {
-    "appId": "com.dippydock.app",
-    "productName": "DippyDock",
+    "appId": "com.moledock.app",
+    "productName": "MoleDock",
     "directories": {
       "output": "release"
     },
@@ -52,18 +52,18 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "public/icon.ico"
+      "icon": "public/icon.png"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "DippyDock"
+      "shortcutName": "MoleDock"
     },
     "mac": {
       "target": "dmg",
-      "icon": "public/icon.icns"
+      "icon": "public/icon.png"
     },
     "linux": {
       "target": "AppImage",

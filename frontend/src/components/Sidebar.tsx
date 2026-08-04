@@ -61,7 +61,7 @@ const Sidebar = () => {
         <div className={`flex items-center gap-3 px-4 h-16 border-b border-gray-700 flex-shrink-0 ${collapsed ? 'justify-center' : ''}`}>
           <Dna className="w-6 h-6 text-blue-400 flex-shrink-0" />
           {!collapsed && (
-            <span className="text-lg font-bold text-white whitespace-nowrap">DippyDock</span>
+            <span className="text-lg font-bold text-white whitespace-nowrap">MoleDock</span>
           )}
         </div>
 
